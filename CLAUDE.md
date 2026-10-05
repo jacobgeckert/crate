@@ -27,6 +27,7 @@ internal/
     downloader/                 Background download queue processor (tick every 10s)
     scheduler/                  Background periodic jobs (new release detection, auto-queue, quality upgrades)
     importer/                   Library import: tag-based scan of existing files into the DB
+    upload/                     Staged upload pipeline: drop files → identify (tags/MBIDs) → review → commit via organizer+tagger (ADR-0008)
     organizer/                  Moves downloaded files into library using the naming template
     tagger/                     Non-destructive ID3/FLAC/WAV tagging + cover art (preserves foreign tags)
     navidrome/                  Optional Navidrome integration (triggers library scan after download)
@@ -159,6 +160,15 @@ Import records only what's on disk, so a `local` artist has no gap view until it
 - **Surfacing**: a `local` entity is the leftover signal. A `local` artist gets a "not linked" badge in the Library list and a "Not linked to a provider" banner on its page (the `web/src/pages/Library.tsx` badge + `ArtistDetail.tsx` banner). Within a linked artist, a still-`local` album gets an "unmatched" badge and its page shows the same banner + merge picker; a still-`local` track shows a `local` badge + link action.
 
 See [ADR-0007](docs/adr/0007-reconcile-local-import.md).
+
+## Uploads (ADR-0008)
+
+`internal/services/upload` is a staged pipeline for files the user drops in by hand (the Upload nav page → drag & drop). Staged files live under `CRATE_UPLOAD_DIR` (default `./uploads`, `/app/data/uploads` in Docker) — **never inside the library**, so the importer and integrity check can't see them. Pipeline: `POST /api/uploads` (multipart, exempt from the 5MiB body cap; batches get their own 1GiB ceiling) stages files + runs identify → `GET /api/uploads/{batch}` is the review payload → `PATCH /api/uploads/{batch}/files/{id}` for skip/track override → `POST /api/uploads/{batch}/commit` (`{on_duplicate: "skip"|"replace"}`) → `DELETE /api/uploads/{batch}` discards.
+
+- **Identify is tag-first** and reuses `importer.ReadTags`/`FileMeta`. Match ladder, album-scoped like the importer's: MB recording id → MB release-track id → title fold (duration drift >15% drops confidence to `low`). Files with a release-group MBID for an album not in the library propose a **new album** — commit creates artist/album/all tracks (`wanted`) via `GetAlbum`, then claims the uploaded ones.
+- **Commit is the download path backwards**: `organizer.Organize` (naming template, cross-device move, replaced-file cleanup) + `tagger.Tag` (non-destructive, ADR-0004) + `ClaimTrackFile` (claims `wanted` rows). Committed tracks also drop their non-active download-queue rows. Navidrome/MA notifiers fire via the downloader's notifier list.
+- **Review before commit**: every file carries `confidence` + `reason` + `duplicate` flags; nothing writes without the user confirming. Staged state lives in `upload_files` so review survives restarts.
+- Fingerprint identification (Chromaprint→AcoustID) is a planned follow-up, not implemented.
 
 ## Navidrome Integration
 

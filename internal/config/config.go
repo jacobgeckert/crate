@@ -12,6 +12,7 @@ type Config struct {
 	ActivityPath string
 	DownloadsDir string
 	LibraryPath  string
+	UploadDir    string
 	ScanInterval time.Duration
 
 	SlskdURL    string
@@ -32,6 +33,7 @@ func Load() *Config {
 		ActivityPath:             envOr("CRATE_ACTIVITY_PATH", "./activity.db"),
 		DownloadsDir:             envOr("CRATE_DOWNLOADS_DIR", "./downloads"),
 		LibraryPath:              envOr("CRATE_LIBRARY_PATH", "./library"),
+		UploadDir:                envOr("CRATE_UPLOAD_DIR", "./uploads"),
 		ScanInterval:             parseDuration(envOr("CRATE_SCAN_INTERVAL", "6h")),
 		SlskdURL:                 envOr("CRATE_SLSKD_URL", "http://localhost:5030"),
 		SlskdAPIKey:              os.Getenv("CRATE_SLSKD_API_KEY"),

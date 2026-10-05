@@ -11,8 +11,8 @@ import (
 	flac "github.com/go-flac/go-flac"
 )
 
-// fileMeta is everything import needs from one music file.
-type fileMeta struct {
+// FileMeta is everything import needs from one music file.
+type FileMeta struct {
 	Path       string
 	Artist     string // album artist when tagged, falling back to track artist
 	Album      string
@@ -32,9 +32,9 @@ type fileMeta struct {
 	MBRecordingID    string // recording MBID (AcoustID fingerprint / Music Assistant), release-independent
 }
 
-// readTags extracts metadata from a music file. Only MP3 and FLAC are
+// ReadTags extracts metadata from a music file. Only MP3 and FLAC are
 // supported — the same formats Crate can tag.
-func readTags(path string) (*fileMeta, error) {
+func ReadTags(path string) (*FileMeta, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mp3":
 		return readMP3(path)
@@ -44,14 +44,14 @@ func readTags(path string) (*fileMeta, error) {
 	return nil, fmt.Errorf("unsupported format")
 }
 
-func readMP3(path string) (*fileMeta, error) {
+func readMP3(path string) (*FileMeta, error) {
 	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
 	if err != nil {
 		return nil, fmt.Errorf("read id3: %w", err)
 	}
 	defer tag.Close()
 
-	m := &fileMeta{Path: path, Format: "mp3"}
+	m := &FileMeta{Path: path, Format: "mp3"}
 	m.Title = strings.TrimSpace(tag.Title())
 	m.Album = strings.TrimSpace(tag.Album())
 
@@ -94,13 +94,13 @@ func readMP3(path string) (*fileMeta, error) {
 	return m, nil
 }
 
-func readFLAC(path string) (*fileMeta, error) {
+func readFLAC(path string) (*FileMeta, error) {
 	f, err := flac.ParseFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read flac: %w", err)
 	}
 
-	m := &fileMeta{Path: path, Format: "flac"}
+	m := &FileMeta{Path: path, Format: "flac"}
 
 	var artist, albumArtist string
 	for _, block := range f.Meta {

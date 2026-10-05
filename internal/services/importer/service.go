@@ -147,7 +147,7 @@ type albumGroup struct {
 	title string
 	years map[int]int
 	rgIDs map[string]bool
-	files []*fileMeta
+	files []*FileMeta
 }
 
 type artistGroup struct {
@@ -168,7 +168,7 @@ func (s *Service) scan(root string, dryRun bool) (*Report, error) {
 
 	for _, path := range files {
 		s.bumpProcessed()
-		meta, err := readTags(path)
+		meta, err := ReadTags(path)
 		if err != nil {
 			report.skip(path, err.Error())
 			continue
@@ -296,7 +296,7 @@ func (s *Service) persistAlbum(artist *models.Artist, g *albumGroup, dryRun bool
 	return nil
 }
 
-func (s *Service) persistTrack(artist *models.Artist, album *models.Album, f *fileMeta, dryRun bool, report *Report) {
+func (s *Service) persistTrack(artist *models.Artist, album *models.Album, f *FileMeta, dryRun bool, report *Report) {
 	mbLinked := album.Provider == musicbrainzProvider && f.MBTrackID != ""
 
 	var track *models.Track

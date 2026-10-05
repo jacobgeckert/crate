@@ -250,3 +250,68 @@ export interface ImportState {
   report?: ImportReport;
   error?: string;
 }
+
+export interface UploadMeta {
+  artist: string;
+  album: string;
+  title: string;
+  track: number;
+  disc: number;
+  year: number;
+  duration_ms: number;
+  format: string;
+  bitrate: number;
+  mb_tagged: boolean;
+}
+
+export interface UploadAlbumRef {
+  id?: number;
+  provider: string;
+  provider_id: string;
+  title: string;
+  new: boolean;
+}
+
+export interface UploadMatch {
+  track_id?: number;
+  track_title?: string;
+  provider_track_id?: string;
+  album?: UploadAlbumRef;
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+  duplicate: boolean;
+}
+
+export interface UploadFileItem {
+  id: number;
+  filename: string;
+  size: number;
+  state: 'uploaded' | 'identified' | 'unidentified' | 'committed' | 'skipped' | 'failed';
+  skip: boolean;
+  error?: string;
+  meta?: UploadMeta;
+  match?: UploadMatch;
+}
+
+export interface UploadBatch {
+  batch_id: string;
+  files: UploadFileItem[];
+  total: number;
+  identified: number;
+  unidentified: number;
+}
+
+export interface UploadBatchSummary {
+  batch_id: string;
+  total: number;
+  identified: number;
+  unidentified: number;
+  committed: number;
+  created_at: string;
+}
+
+export interface UploadCommitResult {
+  committed: { file_id: number; track_id: number; path: string }[];
+  skipped: number[];
+  failed: { file_id: number; error: string }[];
+}

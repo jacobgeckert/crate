@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/upload"
 )
 
 type Server struct {
@@ -28,6 +30,7 @@ type Server struct {
 	activityLog *activity.Log
 	importer    *importer.Service
 	reject      *reject.Service
+	uploads     *upload.Service
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
@@ -36,7 +39,7 @@ type Server struct {
 	version     string
 }
 
-func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string) *Server {
+func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service) *Server {
 	s := &Server{
 		queries:     queries,
 		providers:   providers,
@@ -45,6 +48,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		activityLog: actLog,
 		importer:    importer.NewService(queries, libraryDir, actLog),
 		reject:      reject.NewService(queries, libraryDir, actLog),
+		uploads:     up,
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,
@@ -69,10 +73,10 @@ func (s *Server) setupRouter() chi.Router {
 	r.Use(structuredLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(120 * time.Second))
-	r.Use(maxBodySize(5 << 20))
+	r.Use(maxBodySize(5<<20, "/api/uploads"))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:6969"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -168,6 +172,18 @@ func (s *Server) setupRouter() chi.Router {
 			r.Post("/", s.handleStartImport)
 			r.Get("/", s.handleImportStatus)
 		})
+
+		r.Route("/uploads", func(r chi.Router) {
+			// Music files far exceed the default 5MiB body cap; uploads get
+			// their own 1GiB ceiling via the exemptPrefix in maxBodySize.
+			r.With(maxBodySize(1<<30)).Post("/", s.handleUploadFiles)
+			r.Get("/", s.handleListUploadBatches)
+			r.Get("/{batch}", s.handleGetUploadBatch)
+			r.Post("/{batch}/identify", s.handleIdentifyUpload)
+			r.Patch("/{batch}/files/{file}", s.handlePatchUploadFile)
+			r.Post("/{batch}/commit", s.handleCommitUpload)
+			r.Delete("/{batch}", s.handleDiscardUpload)
+		})
 	})
 
 	s.mountLidarrRoutes(r)
@@ -179,9 +195,15 @@ func (s *Server) setupRouter() chi.Router {
 	return r
 }
 
-func maxBodySize(maxBytes int64) func(http.Handler) http.Handler {
+func maxBodySize(maxBytes int64, exemptPrefixes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, p := range exemptPrefixes {
+				if strings.HasPrefix(r.URL.Path, p) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 			next.ServeHTTP(w, r)
 		})

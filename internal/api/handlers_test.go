@@ -75,7 +75,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	org := &noopOrganizer{}
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
 
-	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil, "/music", "test")
+	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil, "/music", "test", nil)
 
 	return &testEnv{
 		server:      srv,
@@ -2466,7 +2466,7 @@ func newTestEnvWithLibrary(t *testing.T, libraryDir string) *testEnv {
 	org := &noopOrganizer{}
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
 
-	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil, libraryDir, "test")
+	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil, libraryDir, "test", nil)
 
 	return &testEnv{
 		server:      srv,

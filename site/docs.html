@@ -409,6 +409,7 @@
         <a href="#scoring" class="sidebar-link">Scoring System</a>
         <a href="#quality-upgrades" class="sidebar-link">Quality Upgrades</a>
         <a href="#library-import" class="sidebar-link">Library Import</a>
+        <a href="#uploads" class="sidebar-link">Uploads</a>
         <a href="#navidrome" class="sidebar-link">Navidrome</a>
         <a href="#music-assistant" class="sidebar-link">Music Assistant</a>
         <a href="#supported-formats" class="sidebar-link">Supported Formats</a>
@@ -551,6 +552,11 @@
               <td><code>CRATE_LIBRARY_PATH</code></td>
               <td><code>./library</code></td>
               <td>Directory where organized music files are placed. Layout is controlled by the <a href="#naming-template">naming template</a>.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_UPLOAD_DIR</code></td>
+              <td><code>./uploads</code></td>
+              <td>Staging area for <a href="#uploads">uploaded files</a> before they're committed to the library. Must be outside the library dir.</td>
             </tr>
             <tr>
               <td><code>CRATE_SCAN_INTERVAL</code></td>
@@ -1030,6 +1036,24 @@
 
       <div class="callout">
         <strong>Formats:</strong> the importer reads MP3 and FLAC — the same formats Crate writes tags to. For other formats, the database schema is documented for custom importers (see <a href="#database">Database</a>).
+      </div>
+
+      <!-- Uploads -->
+      <h2 id="uploads">Uploads</h2>
+
+      <p>The <strong>Upload</strong> page in the navigation lets you drop audio files into Crate by hand — for example an album you obtained outside Soulseek. Unlike the library importer (which adopts files in place), uploaded files are identified, tagged, and moved into your library layout just like a download.</p>
+
+      <ul>
+        <li><strong>Drag &amp; drop</strong> &mdash; drop a batch of MP3/FLAC/WAV files; they land in a staging area outside the library so nothing half-finished is visible to importers or integrity checks.</li>
+        <li><strong>Identification</strong> &mdash; Crate reads embedded tags. Files with MusicBrainz tags resolve to real provider IDs; otherwise Crate matches artist/album/track by name with a duration sanity check.</li>
+        <li><strong>Review before commit</strong> &mdash; every file shows its proposed album/track match, a confidence level, and a reason. Skip files you don't want, then commit.</li>
+        <li><strong>New albums</strong> &mdash; if a file carries a MusicBrainz release-group ID for an album you don't have, Crate offers to create it: the album and its full tracklist are added (missing tracks become wanted), then your uploads claim their tracks.</li>
+        <li><strong>Duplicates</strong> &mdash; files that match already-owned tracks are flagged and skipped by default, or replaced if you toggle "replace already-owned files".</li>
+        <li><strong>Tagged &amp; organized</strong> &mdash; committed files are moved through the <a href="#naming-template">naming template</a>, tagged non-destructively, and trigger Navidrome/Music Assistant syncs.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Staging dir:</strong> uploads stage under <code>CRATE_UPLOAD_DIR</code> (default <code>./uploads</code>, <code>/app/data/uploads</code> in Docker). Batches can be discarded from the Upload page; committed files are moved out of staging automatically.
       </div>
 
       <!-- Navidrome -->

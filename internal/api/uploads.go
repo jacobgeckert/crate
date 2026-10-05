@@ -1,0 +1,188 @@
+package api
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/TheOutdoorProgrammer/crate/internal/models"
+)
+
+// Uploads
+
+func newBatchID() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%s-%s", strconv.FormatInt(time.Now().UnixNano(), 36), hex.EncodeToString(b[:]))
+}
+
+// handleUploadFiles accepts a multipart batch, stages the files, and runs
+// identification synchronously before returning the review payload.
+func (s *Server) handleUploadFiles(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+	form := r.MultipartForm
+	if form == nil || len(form.File["files"]) == 0 {
+		writeError(w, http.StatusBadRequest, "no files uploaded")
+		return
+	}
+
+	batchID := newBatchID()
+	staged := 0
+	for _, fh := range form.File["files"] {
+		src, err := fh.Open()
+		if err != nil {
+			continue
+		}
+		_, err = s.uploads.Stage(batchID, fh.Filename, src, fh.Size)
+		src.Close()
+		if err != nil {
+			slog.Warn("upload stage failed", "filename", fh.Filename, "error", err)
+			continue
+		}
+		staged++
+	}
+	if staged == 0 {
+		writeError(w, http.StatusBadRequest, "no usable files uploaded")
+		return
+	}
+
+	if err := s.uploads.Identify(r.Context(), batchID); err != nil {
+		writeError(w, http.StatusInternalServerError, "identify failed: "+err.Error())
+		return
+	}
+	view, err := s.uploads.Batch(batchID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load batch")
+		return
+	}
+	writeJSON(w, http.StatusCreated, view)
+}
+
+func (s *Server) handleListUploadBatches(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	batches, err := s.uploads.Batches()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list upload batches")
+		return
+	}
+	if batches == nil {
+		batches = []models.UploadBatchSummary{}
+	}
+	writeJSON(w, http.StatusOK, batches)
+}
+
+func (s *Server) handleGetUploadBatch(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	view, err := s.uploads.Batch(chi.URLParam(r, "batch"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "batch not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (s *Server) handleIdentifyUpload(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	batch := chi.URLParam(r, "batch")
+	if err := s.uploads.Identify(r.Context(), batch); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	view, err := s.uploads.Batch(batch)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load batch")
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (s *Server) handlePatchUploadFile(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	fileID, err := strconv.ParseInt(chi.URLParam(r, "file"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid file id")
+		return
+	}
+	var req struct {
+		TrackID *int64 `json:"track_id"`
+		Skip    *bool  `json:"skip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Skip != nil {
+		if err := s.uploads.SetSkip(fileID, *req.Skip); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update file")
+			return
+		}
+	}
+	if req.TrackID != nil {
+		if err := s.uploads.SetTrackMatch(fileID, *req.TrackID); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) handleCommitUpload(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	var req struct {
+		OnDuplicate string `json:"on_duplicate"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	res, err := s.uploads.Commit(r.Context(), chi.URLParam(r, "batch"), strings.ToLower(req.OnDuplicate))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleDiscardUpload(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	if err := s.uploads.Discard(chi.URLParam(r, "batch")); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

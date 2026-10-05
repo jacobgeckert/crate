@@ -24,6 +24,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/scheduler"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/slskd"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/upload"
 )
 
 var Version = "dev"
@@ -65,7 +66,12 @@ func main() {
 	org := organizer.NewService(queries, cfg.DownloadsDir, cfg.LibraryPath)
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
 	dl.AddNotifier(navidrome.NewClient(queries))
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version)
+	if err := os.MkdirAll(cfg.UploadDir, 0755); err != nil {
+		slog.Error("failed to create upload dir", "error", err)
+		os.Exit(1)
+	}
+	upSvc := upload.NewService(queries, providerMgr, cfg.UploadDir, cfg.LibraryPath, actLog, dl)
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version, upSvc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

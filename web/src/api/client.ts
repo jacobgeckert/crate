@@ -1,4 +1,4 @@
-import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState } from '../types/index';
+import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult } from '../types/index';
 
 const BASE = '/api';
 
@@ -154,4 +154,32 @@ export const api = {
   deleteCooldown: (id: number) =>
     request<void>(`/cooldowns/${id}`, { method: 'DELETE' }),
   clearCooldowns: () => request<void>('/cooldowns', { method: 'DELETE' }),
+
+  // Uploads — multipart, so no JSON Content-Type header.
+  uploadFiles: async (files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f, f.name);
+    const res = await fetch(`${BASE}/uploads`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || res.statusText);
+    }
+    return res.json() as Promise<UploadBatch>;
+  },
+  listUploadBatches: () => request<UploadBatchSummary[]>('/uploads'),
+  getUploadBatch: (batch: string) => request<UploadBatch>(`/uploads/${batch}`),
+  identifyUpload: (batch: string) =>
+    request<UploadBatch>(`/uploads/${batch}/identify`, { method: 'POST' }),
+  patchUploadFile: (batch: string, fileId: number, body: { track_id?: number; skip?: boolean }) =>
+    request<{ status: string }>(`/uploads/${batch}/files/${fileId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  commitUpload: (batch: string, onDuplicate: 'skip' | 'replace') =>
+    request<UploadCommitResult>(`/uploads/${batch}/commit`, {
+      method: 'POST',
+      body: JSON.stringify({ on_duplicate: onDuplicate }),
+    }),
+  discardUpload: (batch: string) =>
+    request<void>(`/uploads/${batch}`, { method: 'DELETE' }),
 };

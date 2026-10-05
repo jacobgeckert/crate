@@ -1,9 +1,19 @@
+FROM node:24-alpine AS frontend
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM golang:1.26-alpine AS backend
 ARG VERSION=dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# The SPA embed target (cmd/crate/dist) is gitignored — build it in-image so a
+# plain checkout or remote git build context works.
+COPY --from=frontend /web/dist ./cmd/crate/dist
 RUN CGO_ENABLED=0 go build -ldflags "-X main.Version=${VERSION}" -o /crate ./cmd/crate/ && \
     CGO_ENABLED=0 go build -o /provider-musicbrainz ./cmd/provider-musicbrainz/ && \
     CGO_ENABLED=0 go build -o /provider-deezer ./cmd/provider-deezer/
@@ -13,6 +23,7 @@ ENV CRATE_DB_PATH=/app/data/crate.db
 ENV CRATE_CACHE_PATH=/app/data/cache.db
 ENV CRATE_ACTIVITY_PATH=/app/data/activity.db
 ENV CRATE_LIBRARY_PATH=/app/library
+ENV CRATE_UPLOAD_DIR=/app/data/uploads
 ENV CRATE_PROVIDERS=musicbrainz:./provider-musicbrainz:50051,deezer:./provider-deezer:50052
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app

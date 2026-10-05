@@ -80,6 +80,7 @@ Open `http://localhost:6969`.
 - **Quality tiers** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256) with an optional fallback toggle to reject files outside your configured tiers. Scheduler scans one artist per day and re-queues tracks that can be upgraded.
 - **Negative keywords** -- skip files matching configurable keywords (e.g. acapella, instrumental) during auto-download. Manual search still shows them so you can override when needed.
 - **Import existing library** -- tag-based scan of your on-disk collection with dry-run preview; MusicBrainz-tagged files (Picard/beets) link to their real provider IDs automatically
+- **Upload files by hand** -- drag & drop audio files in the UI; Crate reads their tags (MusicBrainz IDs when present), proposes track matches for you to review, then tags and files them into the library like a download
 - **Navidrome integration** -- optionally trigger a Navidrome library scan after each download so new files appear immediately
 - **Music Assistant integration** -- optionally sync your [Music Assistant](https://www.music-assistant.io/) library after each download, and **mark a track bad right from the MA app** by dropping it into a reject playlist: Crate deletes the bad copy, blacklists the source, and re-downloads a better one
 - **Organize** -- moves completed files into the library using a configurable naming template (default `{artist}/{album} ({year})/{track:2} - {title}`), so Crate can match an existing library convention
