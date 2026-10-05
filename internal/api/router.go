@@ -174,9 +174,9 @@ func (s *Server) setupRouter() chi.Router {
 		})
 
 		r.Route("/uploads", func(r chi.Router) {
-			// Music files far exceed the default 5MiB body cap; uploads get
-			// their own 1GiB ceiling via the exemptPrefix in maxBodySize.
-			r.With(maxBodySize(1<<30)).Post("/", s.handleUploadFiles)
+			// Music files far exceed the default 5MiB body cap — the prefix is
+			// exempt from it and the handler bounds the body at 1GiB itself.
+			r.Post("/", s.handleUploadFiles)
 			r.Get("/", s.handleListUploadBatches)
 			r.Get("/{batch}", s.handleGetUploadBatch)
 			r.Post("/{batch}/identify", s.handleIdentifyUpload)

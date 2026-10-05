@@ -31,7 +31,10 @@ func (s *Server) handleUploadFiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
 		return
 	}
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	// Bound the body here as well as at the route — the global 5MiB cap is
+	// bypassed for this prefix, so this reader is the real ceiling.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
+	if err := r.ParseMultipartForm(32 << 20); err != nil { // #nosec G120 -- r.Body is bounded by MaxBytesReader on the line above
 		writeError(w, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
