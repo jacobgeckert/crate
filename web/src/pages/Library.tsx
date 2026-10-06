@@ -5,21 +5,11 @@ import { api } from '../api/client';
 import AlphabetRail from '../components/AlphabetRail';
 import FilterBar from '../components/FilterBar';
 import ProgressBar from '../components/ProgressBar';
-import { formatRelativeDate } from '../lib/format';
+import { formatRelativeDate, providerArtistUrl, PROVIDER_LABEL } from '../lib/format';
 import { useToast } from '../components/Toast';
 import type { Artist } from '../types/index';
 
 type LibrarySort = 'az' | 'recent';
-
-const PROVIDER_ARTIST_URL: Record<string, (id: string) => string> = {
-  musicbrainz: (id) => `https://musicbrainz.org/artist/${id}`,
-  deezer: (id) => `https://www.deezer.com/artist/${id}`,
-};
-
-const PROVIDER_LABEL: Record<string, string> = {
-  musicbrainz: 'MusicBrainz',
-  deezer: 'Deezer',
-};
 
 export default function Library() {
   const { toast } = useToast();
@@ -339,12 +329,12 @@ function ArtistRow({
           <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" />
         </svg>
       )}
-      {!selecting && PROVIDER_ARTIST_URL[artist.provider] && (
+      {!selecting && providerArtistUrl(artist.provider, artist.provider_id) && (
         <button
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            window.open(PROVIDER_ARTIST_URL[artist.provider](artist.provider_id), '_blank', 'noopener');
+            window.open(providerArtistUrl(artist.provider, artist.provider_id), '_blank', 'noopener');
           }}
           className="text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
           title={`View on ${PROVIDER_LABEL[artist.provider] ?? artist.provider}`}

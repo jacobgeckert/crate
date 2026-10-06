@@ -40,3 +40,17 @@ export function formatRelativeDate(iso: string): string {
   if (days < 365) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+const PROVIDER_ARTIST_URL: Record<string, (id: string) => string> = {
+  musicbrainz: (id) => `https://musicbrainz.org/artist/${id}`,
+  deezer: (id) => `https://www.deezer.com/artist/${id}`,
+};
+
+export const PROVIDER_LABEL: Record<string, string> = {
+  musicbrainz: 'MusicBrainz',
+  deezer: 'Deezer',
+};
+
+export function providerArtistUrl(provider: string, providerId: string): string | undefined {
+  return PROVIDER_ARTIST_URL[provider]?.(providerId);
+}
