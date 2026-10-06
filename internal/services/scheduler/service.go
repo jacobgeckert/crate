@@ -85,7 +85,7 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 		slog.Error("scheduler: list watched artists", "error", err)
 		return
 	}
-	watchTypes := s.newReleaseTypes()
+	globalTypes := s.newReleaseTypes()
 	for _, artist := range artists {
 		if artist.WatchNewReleasesSince == nil {
 			continue
@@ -93,6 +93,10 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 		if !s.providers.IsHealthy(artist.Provider) {
 			slog.Warn("scheduler: provider unhealthy, skipping artist", "artist", artist.Name, "provider", artist.Provider)
 			continue
+		}
+		watchTypes := globalTypes
+		if override, err := s.queries.GetArtistWatchReleaseTypes(artist.ID); err == nil && override != nil {
+			watchTypes = override
 		}
 		sinceTime, _ := time.Parse(time.RFC3339, *artist.WatchNewReleasesSince)
 		albumList, err := s.providers.GetArtistAlbums(ctx, artist.Provider, artist.ProviderID)

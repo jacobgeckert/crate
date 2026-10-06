@@ -53,6 +53,11 @@ export default function ArtistDetail() {
     queryFn: api.listProviders,
   });
 
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  });
+
   const { data: relinkResults } = useQuery({
     queryKey: ['relink-search', relinkQuery, relinkProvider],
     queryFn: () => api.search(relinkQuery, relinkProvider || undefined),
@@ -205,10 +210,44 @@ export default function ArtistDetail() {
     const known = ALBUM_TYPE_ORDER.filter((t) => groups.has(t));
     const rest = [...groups.keys()].filter((t) => !ALBUM_TYPE_ORDER.includes(t));
     return [...known, ...rest].map((t) => ({
+      type: t,
       label: ALBUM_TYPE_LABELS[t] ?? `${t[0].toUpperCase()}${t.slice(1)}s`,
       albums: groups.get(t)!,
     }));
   }, [filteredAlbums]);
+
+  // Effective watch types: per-artist override if set, else the global
+  // new_release_types setting, else everything.
+  const globalTypes = useMemo((): Record<string, boolean> => {
+    const d: Record<string, boolean> = { album: true, ep: true, single: true, compilation: true };
+    if (settings?.new_release_types) {
+      try {
+        return { ...d, ...JSON.parse(settings.new_release_types) };
+      } catch { /* malformed — fall through to defaults */ }
+    }
+    return d;
+  }, [settings]);
+
+  const effectiveTypes = artist?.watch_release_types ?? globalTypes;
+
+  // Sections for unchecked watch types start collapsed; the user can expand
+  // them freely afterwards. Initialized once artist + settings have loaded.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    if (collapsed === null && artist && settings !== undefined) {
+      const init: Record<string, boolean> = {};
+      for (const g of albumGroups) {
+        if (effectiveTypes[g.type] === false) init[g.type] = true;
+      }
+      setCollapsed(init);
+    }
+  }, [collapsed, artist, settings, albumGroups, effectiveTypes]);
+
+  const setTypes = useMutation({
+    mutationFn: (types: Record<string, boolean> | null) => api.setArtistReleaseTypes(Number(id), types),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['artist', id] }),
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
 
   if (isLoading) {
     return (
@@ -437,6 +476,40 @@ export default function ArtistDetail() {
         </button>
       </label>
 
+      <div className="bg-zinc-800/50 rounded-lg px-3 py-2.5 mb-3">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-sm font-medium">Release types</p>
+          {artist.watch_release_types && (
+            <button
+              onClick={() => setTypes.mutate(null)}
+              disabled={setTypes.isPending}
+              className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Reset to default
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] text-zinc-500 mb-2">
+          {artist.watch_release_types ? 'Custom for this artist' : 'Using defaults from Settings'}
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {ALBUM_TYPE_ORDER.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTypes.mutate({ ...effectiveTypes, [t]: !effectiveTypes[t] })}
+              disabled={setTypes.isPending}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                effectiveTypes[t] !== false
+                  ? 'bg-green-600/20 text-green-400 border border-green-600/40'
+                  : 'bg-zinc-700/50 text-zinc-500 border border-zinc-700'
+              }`}
+            >
+              {ALBUM_TYPE_LABELS[t]}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {artist.albums && artist.albums.length > 0 && (
         <div>
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Releases</p>
@@ -449,12 +522,25 @@ export default function ArtistDetail() {
             <p className="text-zinc-500 text-sm text-center py-4">No matching albums or tracks</p>
           )}
           {albumGroups.map((group) => (
-            <div key={group.label}>
+            <div key={group.type}>
               {albumGroups.length > 1 && (
-                <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1.5 first:mt-0">
-                  {group.label}
-                </p>
+                <button
+                  onClick={() => setCollapsed((c) => ({ ...(c ?? {}), [group.type]: !c?.[group.type] }))}
+                  className="w-full flex items-center gap-1.5 mt-3 mb-1.5 first:mt-0 text-left"
+                >
+                  <svg
+                    className={`w-3 h-3 text-zinc-500 transition-transform ${collapsed?.[group.type] ? '-rotate-90' : ''}`}
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                  <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
+                    {group.label}
+                  </p>
+                  <span className="text-[11px] text-zinc-600">· {group.albums.length}</span>
+                </button>
               )}
+              {!(albumGroups.length > 1 && collapsed?.[group.type]) && (
               <div className="space-y-1">
                 {group.albums.map((album) => (
               <Link
@@ -494,6 +580,7 @@ export default function ArtistDetail() {
               </Link>
                 ))}
               </div>
+              )}
             </div>
           ))}
         </div>

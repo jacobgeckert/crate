@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
@@ -39,14 +40,51 @@ func (q *Queries) CreateArtist(a *models.Artist) error {
 
 func (q *Queries) GetArtist(id int64) (*models.Artist, error) {
 	a := &models.Artist{}
+	var typesJSON sql.NullString
 	err := q.db.QueryRow(
-		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
+		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, watch_release_types, created_at, updated_at
 		 FROM artists WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &typesJSON, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	if typesJSON.Valid {
+		var m map[string]bool
+		if json.Unmarshal([]byte(typesJSON.String), &m) == nil {
+			a.WatchReleaseTypes = m
+		}
+	}
 	return a, nil
+}
+
+// GetArtistWatchReleaseTypes returns the artist's per-type watch override, or
+// nil when the artist inherits the global new_release_types setting.
+func (q *Queries) GetArtistWatchReleaseTypes(id int64) (map[string]bool, error) {
+	var v sql.NullString
+	err := q.db.QueryRow(`SELECT watch_release_types FROM artists WHERE id = ?`, id).Scan(&v)
+	if err != nil || !v.Valid {
+		return nil, err
+	}
+	var m map[string]bool
+	if err := json.Unmarshal([]byte(v.String), &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// SetArtistWatchReleaseTypes stores a per-artist watch-type override; nil
+// clears it so the artist inherits the global new_release_types setting again.
+func (q *Queries) SetArtistWatchReleaseTypes(id int64, types map[string]bool) error {
+	var v any
+	if types != nil {
+		b, err := json.Marshal(types)
+		if err != nil {
+			return err
+		}
+		v = string(b)
+	}
+	_, err := q.db.Exec(`UPDATE artists SET watch_release_types = ?, updated_at = ? WHERE id = ?`, v, now(), id)
+	return err
 }
 
 func (q *Queries) ListArtists() ([]models.Artist, error) {

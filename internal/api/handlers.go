@@ -681,6 +681,35 @@ func (s *Server) handleBulkNewReleases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"updated": updated})
 }
 
+// handleSetArtistReleaseTypes stores a per-artist override of which release
+// types the new-release watcher tracks. {"types": {...}} sets the override;
+// {"types": null} clears it so the artist inherits the global setting.
+func (s *Server) handleSetArtistReleaseTypes(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req struct {
+		Types map[string]bool `json:"types"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if _, err := s.queries.GetArtist(id); errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	if err := s.queries.SetArtistWatchReleaseTypes(id, req.Types); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update release types")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleUnwatchArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {

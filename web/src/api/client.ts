@@ -72,6 +72,11 @@ export const api = {
     }),
   refreshArtist: (id: number) =>
     request<{ status: string; reconciling: boolean }>(`/artists/${id}/refresh`, { method: 'POST' }),
+  setArtistReleaseTypes: (id: number, types: Record<string, boolean> | null) =>
+    request<void>(`/artists/${id}/release-types`, {
+      method: 'PUT',
+      body: JSON.stringify({ types }),
+    }),
   setArtistsNewReleases: (ids: number[], enabled: boolean) =>
     request<{ updated: number }>(`/artists/new-releases`, {
       method: 'PUT',

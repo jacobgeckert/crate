@@ -7,6 +7,7 @@ export interface Artist {
   status: 'watched' | 'partial' | 'owned';
   watch_new_releases: boolean;
   watch_new_releases_since?: string;
+  watch_release_types?: Record<string, boolean>;
   created_at: string;
   updated_at: string;
   albums?: Album[];

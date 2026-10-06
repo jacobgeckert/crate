@@ -45,12 +45,15 @@ type Artist struct {
 	Status                ArtistStatus `json:"status" db:"status"`
 	WatchNewReleases      bool         `json:"watch_new_releases" db:"watch_new_releases"`
 	WatchNewReleasesSince *string      `json:"watch_new_releases_since,omitempty" db:"watch_new_releases_since"`
-	CreatedAt             string       `json:"created_at" db:"created_at"`
-	UpdatedAt             string       `json:"updated_at" db:"updated_at"`
-	Albums                []Album      `json:"albums,omitempty"`
-	TotalTracks           int          `json:"total_tracks,omitempty"`
-	OwnedTracks           int          `json:"owned_tracks,omitempty"`
-	Orphaned              bool         `json:"orphaned,omitempty"`
+	// WatchReleaseTypes overrides the global new_release_types setting for this
+	// artist (nil = inherit). Stored as a JSON object in watch_release_types.
+	WatchReleaseTypes map[string]bool `json:"watch_release_types,omitempty"`
+	CreatedAt         string          `json:"created_at" db:"created_at"`
+	UpdatedAt         string          `json:"updated_at" db:"updated_at"`
+	Albums            []Album         `json:"albums,omitempty"`
+	TotalTracks       int             `json:"total_tracks,omitempty"`
+	OwnedTracks       int             `json:"owned_tracks,omitempty"`
+	Orphaned          bool            `json:"orphaned,omitempty"`
 }
 
 type Album struct {
@@ -70,25 +73,25 @@ type Album struct {
 }
 
 type Track struct {
-	ID              int64       `json:"id" db:"id"`
-	AlbumID         int64       `json:"album_id" db:"album_id"`
-	Title           string      `json:"title" db:"title"`
-	TrackNumber     int         `json:"track_number" db:"track_number"`
-	DiscNumber      int         `json:"disc_number" db:"disc_number"`
-	DurationMs      int         `json:"duration_ms" db:"duration_ms"`
-	Provider        string      `json:"provider" db:"provider"`
-	ProviderID      string      `json:"provider_id" db:"provider_id"`
-	Status          TrackStatus `json:"status" db:"status"`
-	FilePath        *string     `json:"file_path,omitempty" db:"file_path"`
+	ID                 int64       `json:"id" db:"id"`
+	AlbumID            int64       `json:"album_id" db:"album_id"`
+	Title              string      `json:"title" db:"title"`
+	TrackNumber        int         `json:"track_number" db:"track_number"`
+	DiscNumber         int         `json:"disc_number" db:"disc_number"`
+	DurationMs         int         `json:"duration_ms" db:"duration_ms"`
+	Provider           string      `json:"provider" db:"provider"`
+	ProviderID         string      `json:"provider_id" db:"provider_id"`
+	Status             TrackStatus `json:"status" db:"status"`
+	FilePath           *string     `json:"file_path,omitempty" db:"file_path"`
 	DownloadedFrom     *string     `json:"downloaded_from,omitempty" db:"downloaded_from"`
 	DownloadedFilename *string     `json:"downloaded_filename,omitempty" db:"downloaded_filename"`
 	DownloadFormat     *string     `json:"download_format,omitempty" db:"download_format"`
 	DownloadBitrate    *int        `json:"download_bitrate,omitempty" db:"download_bitrate"`
 	MBRecordingID      *string     `json:"mb_recording_id,omitempty" db:"mb_recording_id"`
-	CreatedAt       string      `json:"created_at" db:"created_at"`
-	UpdatedAt       string      `json:"updated_at" db:"updated_at"`
-	AlbumTitle      string      `json:"album_title,omitempty"`
-	ArtistName      string      `json:"artist_name,omitempty"`
+	CreatedAt          string      `json:"created_at" db:"created_at"`
+	UpdatedAt          string      `json:"updated_at" db:"updated_at"`
+	AlbumTitle         string      `json:"album_title,omitempty"`
+	ArtistName         string      `json:"artist_name,omitempty"`
 }
 
 type QualityTier struct {
@@ -113,12 +116,12 @@ type DownloadQueueItem struct {
 }
 
 type ActivityLog struct {
-	ID        int64  `json:"id"`
-	Action    string `json:"action"`
+	ID         int64  `json:"id"`
+	Action     string `json:"action"`
 	EntityType string `json:"entity_type"`
-	EntityID  int64  `json:"entity_id"`
-	Details   string `json:"details"`
-	CreatedAt string `json:"created_at"`
+	EntityID   int64  `json:"entity_id"`
+	Details    string `json:"details"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type UserCooldown struct {
