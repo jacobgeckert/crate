@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -308,6 +309,12 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, albums []*pb.AlbumSummary) {
 	ctx := context.Background()
+	name := fmt.Sprintf("artist %d", artistID)
+	if artist, err := s.queries.GetArtist(artistID); err == nil && artist != nil {
+		name = artist.Name
+	}
+	slog.Info("sync: saving watched discography", "artist", name, "provider", providerName, "releases", len(albums))
+	added := 0
 	for _, pa := range albums {
 		if existingAlbum, _ := s.queries.FindAlbumByProvider(providerName, pa.Id); existingAlbum != nil {
 			if existingAlbum.Status != models.AlbumStatusIgnored {
@@ -316,14 +323,18 @@ func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, alb
 			continue
 		}
 		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
+		added++
 	}
+	slog.Info("sync: discography saved", "artist", name, "provider", providerName, "added", added)
 }
 
 func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album *models.Album) {
 	albumDetail, err := s.providers.GetAlbum(ctx, providerName, album.ProviderID)
 	if err != nil {
+		slog.Error("sync: failed to fetch release tracklist", "album", album.Title, "provider", providerName, "error", err)
 		return
 	}
+	added := 0
 	for _, pt := range albumDetail.Tracks {
 		if _, err := s.queries.FindTrackByProvider(providerName, pt.Id); err == nil {
 			continue
@@ -338,6 +349,10 @@ func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album
 			ProviderID:  pt.Id,
 			Status:      models.TrackStatusWanted,
 		})
+		added++
+	}
+	if added > 0 {
+		slog.Info("sync: release gained new tracks", "album", album.Title, "provider", providerName, "tracks_added", added)
 	}
 }
 
@@ -355,15 +370,18 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 		Status:     models.AlbumStatusWatched,
 	}
 	if err := s.queries.CreateAlbum(album); err != nil {
+		slog.Error("sync: failed to create release", "album", pa.Title, "provider", providerName, "error", err)
 		return
 	}
 
 	albumDetail, err := s.providers.GetAlbum(ctx, providerName, pa.Id)
 	if err != nil {
+		slog.Error("sync: failed to fetch tracklist, release saved without tracks", "album", pa.Title, "provider", providerName, "error", err)
 		return
 	}
+	tracks := 0
 	for _, pt := range albumDetail.Tracks {
-		s.queries.CreateTrack(&models.Track{
+		if err := s.queries.CreateTrack(&models.Track{
 			AlbumID:     album.ID,
 			Title:       pt.Title,
 			TrackNumber: int(pt.TrackNumber),
@@ -372,8 +390,11 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 			Provider:    providerName,
 			ProviderID:  pt.Id,
 			Status:      models.TrackStatusWanted,
-		})
+		}); err == nil {
+			tracks++
+		}
 	}
+	slog.Info("sync: added release", "album", pa.Title, "type", pa.RecordType, "provider", providerName, "tracks", tracks)
 }
 
 func (s *Server) handleWatchAlbum(w http.ResponseWriter, r *http.Request) {

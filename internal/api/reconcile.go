@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
@@ -24,17 +26,26 @@ import (
 // provider discography. Safe to re-run: already-linked albums are recognised by
 // provider id and only gain newly-listed tracks, so it never duplicates.
 func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artistProviderID string) {
-	ctx := context.Background()
+	// A wedged provider must not park a background worker forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	name := fmt.Sprintf("artist %d", artistID)
+	if artist, err := s.queries.GetArtist(artistID); err == nil && artist != nil {
+		name = artist.Name
+	}
+	slog.Info("sync: starting discography sync", "artist", name, "provider", providerName)
 
 	albumList, err := s.providers.GetArtistAlbums(ctx, providerName, artistProviderID)
 	if err != nil {
-		slog.Error("reconcile: fetch discography", "artist_id", artistID, "provider", providerName, "error", err)
+		slog.Error("sync: failed to fetch discography from provider", "artist", name, "provider", providerName, "error", err)
 		return
 	}
+	slog.Info("sync: provider returned releases", "artist", name, "provider", providerName, "releases", len(albumList.Albums))
 
 	existing, err := s.queries.ListAlbumsByArtist(artistID)
 	if err != nil {
-		slog.Error("reconcile: list albums", "artist_id", artistID, "error", err)
+		slog.Error("sync: list albums", "artist_id", artistID, "error", err)
 		return
 	}
 
@@ -52,6 +63,7 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 		}
 	}
 	used := make(map[int64]bool)
+	added := 0
 
 	for _, pa := range albumList.Albums {
 		if a, ok := linked[pa.Id]; ok {
@@ -61,8 +73,9 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 		}
 		if match := matchLocalAlbum(locals, used, pa); match != nil {
 			used[match.ID] = true
+			slog.Info("sync: matched existing album to provider release", "artist", name, "album", match.Title, "type", pa.RecordType)
 			if err := s.queries.RelinkAlbum(match.ID, providerName, pa.Id); err != nil {
-				slog.Error("reconcile: relink album", "album_id", match.ID, "error", err)
+				slog.Error("sync: relink album", "album_id", match.ID, "error", err)
 				continue
 			}
 			s.reconcileAlbumTracks(ctx, providerName, match.ID, pa.Id)
@@ -70,10 +83,13 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 		}
 		// A genuine gap: create the album with every track wanted.
 		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
+		added++
 	}
 
-	slog.Info("reconcile: artist done", "artist_id", artistID, "provider", providerName,
-		"provider_albums", len(albumList.Albums), "local_albums", len(locals), "albums_matched", len(used))
+	slog.Info("sync: discography sync complete", "artist", name, "provider", providerName,
+		"provider_releases", len(albumList.Albums), "added", added, "local_matched", len(used))
+	s.activityLog.Record("discography_sync", "artist", artistID, fmt.Sprintf(
+		"Synced %s from %s — %d release(s) added, %d local album(s) matched", name, providerName, added, len(used)))
 }
 
 // reconcileAlbumTracks reconciles one album's tracks against the provider's
@@ -83,15 +99,20 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 // matching nothing stay owned + local. With no local tracks present it
 // degenerates to "create the missing wanted tracks", matching the watch path.
 func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, albumID int64, albumProviderID string) {
+	title := fmt.Sprintf("album %d", albumID)
+	if album, err := s.queries.GetAlbum(albumID); err == nil && album != nil {
+		title = album.Title
+	}
+
 	detail, err := s.providers.GetAlbum(ctx, providerName, albumProviderID)
 	if err != nil {
-		slog.Error("reconcile: fetch album", "album_id", albumID, "provider_id", albumProviderID, "error", err)
+		slog.Error("sync: failed to fetch release tracklist", "album", title, "provider", providerName, "provider_id", albumProviderID, "error", err)
 		return
 	}
 
 	existing, err := s.queries.ListTracksByAlbum(albumID)
 	if err != nil {
-		slog.Error("reconcile: list tracks", "album_id", albumID, "error", err)
+		slog.Error("sync: list tracks", "album", title, "error", err)
 		return
 	}
 
@@ -107,6 +128,7 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 		}
 	}
 	used := make(map[int64]bool)
+	matched, added := 0, 0
 
 	for _, pt := range detail.Tracks {
 		if linked[pt.Id] {
@@ -115,7 +137,9 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 		if match := matchLocalTrack(locals, used, pt); match != nil {
 			used[match.ID] = true
 			if err := s.queries.RelinkTrack(match.ID, providerName, pt.Id); err != nil {
-				slog.Error("reconcile: relink track", "track_id", match.ID, "error", err)
+				slog.Error("sync: relink track", "album", title, "track", pt.Title, "error", err)
+			} else {
+				matched++
 			}
 			continue
 		}
@@ -129,8 +153,13 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 			ProviderID:  pt.Id,
 			Status:      models.TrackStatusWanted,
 		}); err != nil {
-			slog.Error("reconcile: create wanted track", "album_id", albumID, "error", err)
+			slog.Error("sync: create wanted track", "album", title, "track", pt.Title, "error", err)
+		} else {
+			added++
 		}
+	}
+	if added > 0 || matched > 0 {
+		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched)
 	}
 }
 

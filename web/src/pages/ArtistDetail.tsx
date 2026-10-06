@@ -31,6 +31,7 @@ export default function ArtistDetail() {
   const [reconciling, setReconciling] = useState(false);
   const lastAlbumCount = useRef(-1);
   const reconcileTicks = useRef(0);
+  const stableTicks = useRef(0);
 
   const { data: artist, isLoading } = useQuery({
     queryKey: ['artist', id],
@@ -103,6 +104,7 @@ export default function ArtistDetail() {
       if (res?.reconciling) {
         lastAlbumCount.current = -1;
         reconcileTicks.current = 0;
+        stableTicks.current = 0;
         setReconciling(true);
         toast('Linking — filling in the discography…', 'success');
       } else {
@@ -119,6 +121,7 @@ export default function ArtistDetail() {
       if (res?.reconciling) {
         lastAlbumCount.current = -1;
         reconcileTicks.current = 0;
+        stableTicks.current = 0;
         setReconciling(true);
       }
       toast('Refreshing discography…', 'success');
@@ -135,13 +138,16 @@ export default function ArtistDetail() {
     });
   };
 
-  // Stop polling once the reconcile has drained (album count stable) or after a
-  // ~60s backstop, so the UI settles on the finished discography.
+  // Stop polling once the reconcile has drained (album count stable across
+  // several ticks — one quiet poll is normal at provider rate limits) or after
+  // a ~5min backstop, so the UI settles on the finished discography.
   useEffect(() => {
     if (!reconciling || !artist) return;
     const count = artist.albums?.length ?? 0;
     reconcileTicks.current += 1;
-    if ((count > 0 && count === lastAlbumCount.current) || reconcileTicks.current > 30) {
+    if (count === lastAlbumCount.current) stableTicks.current += 1;
+    else stableTicks.current = 0;
+    if (stableTicks.current >= 4 || reconcileTicks.current > 150) {
       setReconciling(false);
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     }
@@ -372,7 +378,7 @@ export default function ArtistDetail() {
       {reconciling && (
         <div className="flex items-center gap-2.5 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2.5 mb-4">
           <div className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
-          <p className="text-sm text-blue-300">Linking to provider — pulling the discography and matching your files…</p>
+          <p className="text-sm text-blue-300">Syncing discography — new releases appear as they're matched. Large discographies take a while at provider rate limits.</p>
         </div>
       )}
 
