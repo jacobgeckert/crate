@@ -54,6 +54,18 @@ type Artist struct {
 	TotalTracks       int             `json:"total_tracks,omitempty"`
 	OwnedTracks       int             `json:"owned_tracks,omitempty"`
 	Orphaned          bool            `json:"orphaned,omitempty"`
+	// Sync is a live snapshot of background discography-sync progress — set
+	// only by the artist detail endpoint while a reconcile is running/has run.
+	Sync *SyncInfo `json:"sync,omitempty"`
+}
+
+// SyncInfo reports progress of a background artist discography sync.
+type SyncInfo struct {
+	Active  bool   `json:"active"`
+	Phase   string `json:"phase,omitempty"`
+	Total   int    `json:"total"`
+	Done    int    `json:"done"`
+	Current string `json:"current,omitempty"`
 }
 
 type Album struct {

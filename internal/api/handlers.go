@@ -609,6 +609,9 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	}
 	artist.Albums = albums
 	artist.Orphaned = !s.providers.IsHealthy(artist.Provider)
+	if v, ok := s.syncStatus.Load(id); ok {
+		artist.Sync = v.(*models.SyncInfo)
+	}
 
 	writeJSON(w, http.StatusOK, artist)
 }

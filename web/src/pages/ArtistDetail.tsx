@@ -148,6 +148,12 @@ export default function ArtistDetail() {
   // a ~5min backstop, so the UI settles on the finished discography.
   useEffect(() => {
     if (!reconciling || !artist) return;
+    // The server reports sync state directly — a finished one ends the poll.
+    if (artist.sync && !artist.sync.active) {
+      setReconciling(false);
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      return;
+    }
     const count = artist.albums?.length ?? 0;
     reconcileTicks.current += 1;
     if (count === lastAlbumCount.current) stableTicks.current += 1;
@@ -430,7 +436,18 @@ export default function ArtistDetail() {
       {reconciling && (
         <div className="flex items-center gap-2.5 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2.5 mb-4">
           <div className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
-          <p className="text-sm text-blue-300">Syncing discography — new releases appear as they're matched. Large discographies take a while at provider rate limits.</p>
+          <div className="min-w-0">
+            <p className="text-sm text-blue-300">
+              {!artist.sync || (artist.sync.active && artist.sync.total === 0)
+                ? 'Contacting provider…'
+                : artist.sync.active
+                  ? `Syncing releases — ${artist.sync.done} of ${artist.sync.total}`
+                  : 'Finishing up…'}
+            </p>
+            {artist.sync?.active && artist.sync.current && (
+              <p className="text-[11px] text-blue-400/70 truncate">{artist.sync.current}</p>
+            )}
+          </div>
         </div>
       )}
 

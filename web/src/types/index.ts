@@ -14,6 +14,7 @@ export interface Artist {
   total_tracks?: number;
   owned_tracks?: number;
   orphaned?: boolean;
+  sync?: { active: boolean; phase?: string; total: number; done: number; current?: string };
 }
 
 export interface Album {

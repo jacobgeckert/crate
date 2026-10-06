@@ -36,6 +36,9 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	}
 	slog.Info("sync: starting discography sync", "artist", name, "provider", providerName)
 
+	s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "contacting provider"})
+	defer s.finishSync(artistID)
+
 	albumList, err := s.providers.GetArtistAlbums(ctx, providerName, artistProviderID)
 	if err != nil {
 		slog.Error("sync: failed to fetch discography from provider", "artist", name, "provider", providerName, "error", err)
@@ -66,8 +69,10 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	}
 	used := make(map[int64]bool)
 	added := 0
+	total := len(albumList.Albums)
 
-	for _, pa := range albumList.Albums {
+	for i, pa := range albumList.Albums {
+		s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "syncing releases", Total: total, Done: i, Current: pa.Title})
 		if a, ok := linked[pa.Id]; ok {
 			if d := pa.Metadata["release_date"]; d != "" {
 				s.queries.BackfillAlbumReleaseDate(a.ID, d)
@@ -93,6 +98,7 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
 		added++
 	}
+	s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "syncing releases", Total: total, Done: total})
 
 	slog.Info("sync: discography sync complete", "artist", name, "provider", providerName,
 		"provider_releases", len(albumList.Albums), "added", added, "local_matched", len(used))
@@ -229,6 +235,21 @@ func matchLocalTrack(locals []*models.Track, used map[int64]bool, pt *pb.TrackIn
 
 func foldEqual(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+// setSync/finishSync publish live discography-sync progress for the artist
+// detail page's polling banner. finishSync flips Active off but keeps the
+// final counts so the UI can show the completed state.
+func (s *Server) setSync(artistID int64, st *models.SyncInfo) {
+	s.syncStatus.Store(artistID, st)
+}
+
+func (s *Server) finishSync(artistID int64) {
+	if v, ok := s.syncStatus.Load(artistID); ok {
+		st := *v.(*models.SyncInfo)
+		st.Active = false
+		s.syncStatus.Store(artistID, &st)
+	}
 }
 
 // enrichArtistImage backfills artist.image_url from Deezer for artists whose

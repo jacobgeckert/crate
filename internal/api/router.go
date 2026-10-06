@@ -34,9 +34,12 @@ type Server struct {
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
-	startTime   time.Time
-	libraryDir  string
-	version     string
+	// syncStatus: artistID → *models.SyncInfo — live discography-sync progress
+	// for the artist detail page's polling banner.
+	syncStatus sync.Map
+	startTime  time.Time
+	libraryDir string
+	version    string
 }
 
 func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service) *Server {
