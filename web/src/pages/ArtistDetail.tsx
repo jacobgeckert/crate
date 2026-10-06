@@ -38,15 +38,21 @@ export default function ArtistDetail() {
     queryFn: () => api.getArtist(Number(id)),
     enabled: !!id,
     refetchInterval: (query) => {
-      if (reconciling) return 2000;
       const a = query.state.data;
-      if (!a?.albums) return false;
+      if (reconciling || a?.sync?.active) return 2000;
+      if (!a?.albums) return 20_000;
       const hasActive = a.albums.some((al: Album) =>
         al.tracks?.some((t: Track) => t.status === 'downloading')
       );
-      return hasActive ? 10_000 : false;
+      // Ambient check (~20s) picks up syncs started on other devices — the
+      // server-side sync state is shared.
+      return hasActive ? 10_000 : 20_000;
     },
   });
+
+  // Server-reported sync is device-independent — a refresh started on another
+  // device shows here too once the ambient poll sees it.
+  const syncing = reconciling || !!artist?.sync?.active;
 
   const { data: providers } = useQuery({
     queryKey: ['providers'],
@@ -336,11 +342,11 @@ export default function ArtistDetail() {
           {artist.provider !== 'local' && (
             <button
               onClick={() => refresh.mutate()}
-              disabled={refresh.isPending || reconciling}
+              disabled={refresh.isPending || syncing}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors disabled:opacity-50"
               title="Refresh discography from provider"
             >
-              <svg className={`w-3.5 h-3.5 ${refresh.isPending || reconciling ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg className={`w-3.5 h-3.5 ${refresh.isPending || syncing ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21.5 2v6h-6M2.5 22v-6h6" /><path d="M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
               </svg>
             </button>
@@ -435,7 +441,7 @@ export default function ArtistDetail() {
         </div>
       )}
 
-      {reconciling && (
+      {syncing && (
         <div className="flex items-center gap-2.5 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2.5 mb-4">
           <div className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
           <div className="min-w-0">

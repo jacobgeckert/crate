@@ -106,17 +106,21 @@ export default function Library() {
   });
 
   // Poll live sync progress for the artists we just queued; stops when every
-  // one reports inactive (or on a ~5min backstop).
+  // one reports inactive (or on a ~5min backstop). Always enabled at a slow
+  // ambient rate so syncs started on another device show here too — sync
+  // state is shared server-side.
   const { data: syncStatus } = useQuery({
     queryKey: ['artist-sync'],
     queryFn: api.getSyncStatus,
-    enabled: refreshIds.length > 0,
-    refetchInterval: refreshIds.length > 0 ? 2000 : false,
+    refetchInterval: (query) =>
+      (query.state.data?.items ?? []).some((i) => i.active) ? 2000 : 20_000,
   });
   const refreshSync = useMemo(() => {
+    if (refreshIds.length === 0) return syncStatus?.items ?? [];
     const ids = new Set(refreshIds);
     return (syncStatus?.items ?? []).filter((i) => ids.has(i.artist_id));
   }, [syncStatus, refreshIds]);
+  const ambientSyncs = refreshSync.filter((i) => i.active);
 
   useEffect(() => {
     if (refreshIds.length === 0 || !syncStatus) return;
@@ -326,12 +330,14 @@ export default function Library() {
         </div>
       )}
 
-      {refreshIds.length > 0 && (
+      {(refreshIds.length > 0 || ambientSyncs.length > 0) && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40">
           <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
           <div className="min-w-0">
             <p className="text-xs text-zinc-300 whitespace-nowrap">
-              Refreshing discographies — {refreshSync.filter((i) => !i.active && i.done > 0).length} of {refreshIds.length} artists
+              {refreshIds.length > 0
+                ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active && i.done > 0).length} of ${refreshIds.length} artists`
+                : `Syncing discography — ${ambientSyncs.length} artist(s)`}
             </p>
             {(() => {
               const active = refreshSync.find((i) => i.active);
