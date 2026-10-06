@@ -182,8 +182,10 @@ export default function ArtistDetail() {
     for (const album of artist.albums) {
       const type = album.record_type || 'album';
       recordTypes[type] = (recordTypes[type] || 0) + 1;
+      if (album.status === 'ignored') continue;
       if (album.tracks) {
         for (const track of album.tracks) {
+          if (track.status === 'ignored') continue;
           totalTracks++;
           totalDuration += track.duration_ms;
           if (track.status === 'owned') ownedTracks++;
