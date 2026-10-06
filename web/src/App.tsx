@@ -10,6 +10,7 @@ import BrowseAlbum from './pages/BrowseAlbum';
 import ArtistDetail from './pages/ArtistDetail';
 import AlbumDetail from './pages/AlbumDetail';
 import Downloads from './pages/Downloads';
+import Upcoming from './pages/Upcoming';
 import Upload from './pages/Upload';
 import Settings from './pages/Settings';
 import BlockedSources from './pages/BlockedSources';
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/artist/:id" element={<ArtistDetail />} />
             <Route path="/album/:id" element={<AlbumDetail />} />
             <Route path="/downloads" element={<Downloads />} />
+            <Route path="/upcoming" element={<Upcoming />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/blocked" element={<BlockedSources />} />

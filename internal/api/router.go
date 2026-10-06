@@ -111,6 +111,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Delete("/{id}", s.handleUnwatchArtist)
 		})
 
+		r.Get("/releases/upcoming", s.handleUpcomingReleases)
+
 		r.Route("/albums", func(r chi.Router) {
 			r.Get("/{id}", s.handleGetAlbum)
 			r.Post("/{id}/queue", s.handleQueueAlbumTracks)

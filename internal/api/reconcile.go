@@ -69,6 +69,9 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 
 	for _, pa := range albumList.Albums {
 		if a, ok := linked[pa.Id]; ok {
+			if d := pa.Metadata["release_date"]; d != "" {
+				s.queries.BackfillAlbumReleaseDate(a.ID, d)
+			}
 			// Already ours on this provider — fill any tracks it's newly listing.
 			s.reconcileAlbumTracks(ctx, providerName, a.ID, pa.Id)
 			continue
@@ -79,6 +82,9 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 			if err := s.queries.RelinkAlbum(match.ID, providerName, pa.Id); err != nil {
 				slog.Error("sync: relink album", "album_id", match.ID, "error", err)
 				continue
+			}
+			if d := pa.Metadata["release_date"]; d != "" {
+				s.queries.BackfillAlbumReleaseDate(match.ID, d)
 			}
 			s.reconcileAlbumTracks(ctx, providerName, match.ID, pa.Id)
 			continue

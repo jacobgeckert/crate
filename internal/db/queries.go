@@ -215,15 +215,49 @@ func (q *Queries) RelinkTrack(id int64, provider, providerID string) error {
 func (q *Queries) CreateAlbum(a *models.Album) error {
 	ts := now()
 	result, err := q.db.Exec(
-		`INSERT INTO albums (artist_id, title, year, provider, provider_id, cover_url, record_type, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ArtistID, a.Title, a.Year, a.Provider, a.ProviderID, a.CoverURL, a.RecordType, a.Status, ts, ts,
+		`INSERT INTO albums (artist_id, title, year, provider, provider_id, cover_url, record_type, release_date, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ArtistID, a.Title, a.Year, a.Provider, a.ProviderID, a.CoverURL, a.RecordType, a.ReleaseDate, a.Status, ts, ts,
 	)
 	if err != nil {
 		return err
 	}
 	a.ID, _ = result.LastInsertId()
 	return nil
+}
+
+// ListUpcomingReleases returns non-ignored albums whose release_date is today
+// or later, soonest first, for the Upcoming page.
+func (q *Queries) ListUpcomingReleases(today string) ([]models.Album, error) {
+	rows, err := q.db.Query(
+		`SELECT a.id, a.artist_id, a.title, a.year, a.provider, a.provider_id, a.cover_url, a.record_type, a.release_date, a.status, a.created_at, a.updated_at, ar.name
+		 FROM albums a JOIN artists ar ON ar.id = a.artist_id
+		 WHERE a.release_date IS NOT NULL AND a.release_date != '' AND a.release_date >= ? AND a.status != 'ignored'
+		 ORDER BY a.release_date ASC
+		 LIMIT 200`, today,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var albums []models.Album
+	for rows.Next() {
+		var a models.Album
+		if err := rows.Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseDate, &a.Status, &a.CreatedAt, &a.UpdatedAt, &a.ArtistName); err != nil {
+			return nil, err
+		}
+		albums = append(albums, a)
+	}
+	return albums, rows.Err()
+}
+
+// BackfillAlbumReleaseDate stamps a release date on a row that lacks one —
+// used when a provider sync sees a date for an album created before dates
+// were tracked.
+func (q *Queries) BackfillAlbumReleaseDate(id int64, date string) error {
+	_, err := q.db.Exec(`UPDATE albums SET release_date = ? WHERE id = ? AND (release_date IS NULL OR release_date = '')`, date, id)
+	return err
 }
 
 func (q *Queries) GetAlbum(id int64) (*models.Album, error) {

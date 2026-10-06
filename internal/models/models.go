@@ -57,19 +57,20 @@ type Artist struct {
 }
 
 type Album struct {
-	ID         int64       `json:"id" db:"id"`
-	ArtistID   int64       `json:"artist_id" db:"artist_id"`
-	Title      string      `json:"title" db:"title"`
-	Year       *int        `json:"year,omitempty" db:"year"`
-	Provider   string      `json:"provider" db:"provider"`
-	ProviderID string      `json:"provider_id" db:"provider_id"`
-	CoverURL   *string     `json:"cover_url,omitempty" db:"cover_url"`
-	RecordType string      `json:"record_type" db:"record_type"`
-	Status     AlbumStatus `json:"status" db:"status"`
-	CreatedAt  string      `json:"created_at" db:"created_at"`
-	UpdatedAt  string      `json:"updated_at" db:"updated_at"`
-	ArtistName string      `json:"artist_name,omitempty"`
-	Tracks     []Track     `json:"tracks,omitempty"`
+	ID          int64       `json:"id" db:"id"`
+	ArtistID    int64       `json:"artist_id" db:"artist_id"`
+	Title       string      `json:"title" db:"title"`
+	Year        *int        `json:"year,omitempty" db:"year"`
+	Provider    string      `json:"provider" db:"provider"`
+	ProviderID  string      `json:"provider_id" db:"provider_id"`
+	CoverURL    *string     `json:"cover_url,omitempty" db:"cover_url"`
+	RecordType  string      `json:"record_type" db:"record_type"`
+	ReleaseDate *string     `json:"release_date,omitempty" db:"release_date"`
+	Status      AlbumStatus `json:"status" db:"status"`
+	CreatedAt   string      `json:"created_at" db:"created_at"`
+	UpdatedAt   string      `json:"updated_at" db:"updated_at"`
+	ArtistName  string      `json:"artist_name,omitempty"`
+	Tracks      []Track     `json:"tracks,omitempty"`
 }
 
 type Track struct {

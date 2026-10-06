@@ -319,6 +319,9 @@ func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, alb
 	added := 0
 	for _, pa := range albums {
 		if existingAlbum, _ := s.queries.FindAlbumByProvider(providerName, pa.Id); existingAlbum != nil {
+			if d := pa.Metadata["release_date"]; d != "" {
+				s.queries.BackfillAlbumReleaseDate(existingAlbum.ID, d)
+			}
 			if existingAlbum.Status != models.AlbumStatusIgnored {
 				s.syncAlbumTracks(ctx, providerName, existingAlbum)
 			}
@@ -362,14 +365,15 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 	year := intPtrOrNil(int(pa.Year))
 	cover := pa.CoverUrl
 	album := &models.Album{
-		ArtistID:   artistID,
-		Title:      pa.Title,
-		Year:       year,
-		Provider:   providerName,
-		ProviderID: pa.Id,
-		CoverURL:   strPtrOrNil(cover),
-		RecordType: pa.RecordType,
-		Status:     models.AlbumStatusWatched,
+		ArtistID:    artistID,
+		Title:       pa.Title,
+		Year:        year,
+		Provider:    providerName,
+		ProviderID:  pa.Id,
+		CoverURL:    strPtrOrNil(cover),
+		RecordType:  pa.RecordType,
+		ReleaseDate: strPtrOrNil(pa.Metadata["release_date"]),
+		Status:      models.AlbumStatusWatched,
 	}
 	if err := s.queries.CreateAlbum(album); err != nil {
 		slog.Error("sync: failed to create release", "album", pa.Title, "provider", providerName, "error", err)
@@ -710,6 +714,18 @@ func (s *Server) handleSetArtistReleaseTypes(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUpcomingReleases lists releases dated today or later across all
+// artists, soonest first — the Upcoming page.
+func (s *Server) handleUpcomingReleases(w http.ResponseWriter, r *http.Request) {
+	today := time.Now().UTC().Format("2006-01-02")
+	albums, err := s.queries.ListUpcomingReleases(today)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list upcoming releases")
+		return
+	}
+	writeJSON(w, http.StatusOK, albums)
 }
 
 func (s *Server) handleUnwatchArtist(w http.ResponseWriter, r *http.Request) {

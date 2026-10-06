@@ -25,6 +25,7 @@ export interface Album {
   provider_id: string;
   cover_url?: string;
   record_type: string;
+  release_date?: string;
   status: 'watched' | 'owned' | 'ignored';
   created_at: string;
   updated_at: string;

@@ -77,6 +77,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ types }),
     }),
+  getUpcomingReleases: () => request<Album[]>('/releases/upcoming'),
   setArtistsNewReleases: (ids: number[], enabled: boolean) =>
     request<{ updated: number }>(`/artists/new-releases`, {
       method: 'PUT',

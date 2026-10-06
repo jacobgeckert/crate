@@ -126,14 +126,15 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 			}
 			cover := pa.CoverUrl
 			album := models.Album{
-				ArtistID:   artist.ID,
-				Title:      pa.Title,
-				Year:       yearPtr,
-				Provider:   artist.Provider,
-				ProviderID: pa.Id,
-				CoverURL:   strPtrOrNil(cover),
-				RecordType: pa.RecordType,
-				Status:     models.AlbumStatusWatched,
+				ArtistID:    artist.ID,
+				Title:       pa.Title,
+				Year:        yearPtr,
+				Provider:    artist.Provider,
+				ProviderID:  pa.Id,
+				CoverURL:    strPtrOrNil(cover),
+				RecordType:  pa.RecordType,
+				ReleaseDate: strPtrOrNil(releaseDate),
+				Status:      models.AlbumStatusWatched,
 			}
 			if err := s.queries.CreateAlbum(&album); err != nil {
 				continue
