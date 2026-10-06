@@ -145,14 +145,15 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 			}
 			for _, pt := range albumDetail.Tracks {
 				s.queries.CreateTrack(&models.Track{
-					AlbumID:     album.ID,
-					Title:       pt.Title,
-					TrackNumber: int(pt.TrackNumber),
-					DiscNumber:  int(pt.DiscNumber),
-					DurationMs:  int(pt.DurationMs),
-					Provider:    artist.Provider,
-					ProviderID:  pt.Id,
-					Status:      models.TrackStatusWanted,
+					AlbumID:       album.ID,
+					Title:         pt.Title,
+					TrackNumber:   int(pt.TrackNumber),
+					DiscNumber:    int(pt.DiscNumber),
+					DurationMs:    int(pt.DurationMs),
+					Provider:      artist.Provider,
+					ProviderID:    pt.Id,
+					MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
+					Status:        models.TrackStatusWanted,
 				})
 			}
 			added++

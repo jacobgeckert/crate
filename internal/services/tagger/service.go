@@ -10,8 +10,8 @@ import (
 	"time"
 
 	id3v2 "github.com/bogem/id3v2/v2"
-	flac "github.com/go-flac/go-flac"
 	"github.com/go-flac/flacvorbis"
+	flac "github.com/go-flac/go-flac"
 )
 
 type TrackMeta struct {
@@ -22,6 +22,14 @@ type TrackMeta struct {
 	DiscNumber  int
 	Year        int
 	CoverURL    string
+	// MusicBrainz identities — written only when set (provider == musicbrainz).
+	// RecordingID is release-independent; the rest describe the specific
+	// release the provider tracklist came from.
+	MBRecordingID    string
+	MBTrackID        string // release-track id
+	MBReleaseGroupID string
+	MBArtistID       string
+	MBAlbumArtistID  string
 }
 
 func Tag(filePath string, meta TrackMeta) error {
@@ -69,6 +77,8 @@ func tagMP3(filePath string, meta TrackMeta) error {
 		tag.AddTextFrame(discID, id3v2.EncodingUTF8, fmt.Sprintf("%d", meta.DiscNumber))
 	}
 
+	tagMB3(tag, meta)
+
 	if meta.CoverURL != "" {
 		if pic := fetchCover(meta.CoverURL); pic != nil {
 			tag.DeleteFrames(tag.CommonID("Attached picture"))
@@ -107,6 +117,9 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 	// Start from the existing comments so foreign fields survive; only strip
 	// the fields Crate is about to rewrite. Falls back to a fresh block when
 	// the file has no (or an unparseable) Vorbis comment block.
+	// MB fields we have values for are stripped-and-rewritten; foreign MB
+	// fields we don't manage (ALBUMID, ARTISTTYPE, …) stay untouched.
+	mbFields := flacMBFields(meta)
 	cmtIdx := -1
 	cmt := flacvorbis.New()
 	for i, block := range f.Meta {
@@ -119,7 +132,11 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 			kept := cmt.Comments[:0]
 			for _, c := range cmt.Comments {
 				key, _, ok := strings.Cut(c, "=")
-				if ok && crateOwnedFLACFields[strings.ToUpper(strings.TrimSpace(key))] {
+				if !ok {
+					continue
+				}
+				k := strings.ToUpper(strings.TrimSpace(key))
+				if crateOwnedFLACFields[k] || mbFields[k] != "" {
 					continue
 				}
 				kept = append(kept, c)
@@ -136,6 +153,9 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 	cmt.Add("DISCNUMBER", fmt.Sprintf("%d", meta.DiscNumber))
 	if meta.Year > 0 {
 		cmt.Add("DATE", fmt.Sprintf("%d", meta.Year))
+	}
+	for k, v := range mbFields {
+		cmt.Add(k, v)
 	}
 
 	cmtBlock := cmt.Marshal()
@@ -158,6 +178,94 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 	}
 
 	return f.Save(filePath)
+}
+
+// flacMBFields maps Vorbis field names to the MusicBrainz ids we have values
+// for — empty set for non-MB tracks, so nothing is stripped or written.
+func flacMBFields(meta TrackMeta) map[string]string {
+	m := map[string]string{}
+	if meta.MBRecordingID != "" {
+		m["MUSICBRAINZ_TRACKID"] = meta.MBRecordingID
+	}
+	if meta.MBTrackID != "" {
+		m["MUSICBRAINZ_RELEASETRACKID"] = meta.MBTrackID
+	}
+	if meta.MBReleaseGroupID != "" {
+		m["MUSICBRAINZ_RELEASEGROUPID"] = meta.MBReleaseGroupID
+	}
+	if meta.MBArtistID != "" {
+		m["MUSICBRAINZ_ARTISTID"] = meta.MBArtistID
+	}
+	if meta.MBAlbumArtistID != "" {
+		m["MUSICBRAINZ_ALBUMARTISTID"] = meta.MBAlbumArtistID
+	}
+	return m
+}
+
+// tagMB3 writes MusicBrainz ids into an ID3v2 tag — recording id as UFID
+// (owner http://musicbrainz.org, the Picard/AcoustID convention) and the rest
+// as TXXX frames with Picard's descriptions. Foreign TXXX/UFID frames (e.g.
+// ReplayGain) are preserved: the whole frame class is swapped out, foreign
+// frames re-added, then ours appended.
+func tagMB3(tag *id3v2.Tag, meta TrackMeta) {
+	txxx := map[string]string{}
+	if meta.MBTrackID != "" {
+		txxx["MusicBrainz Release Track Id"] = meta.MBTrackID
+	}
+	if meta.MBReleaseGroupID != "" {
+		txxx["MusicBrainz Release Group Id"] = meta.MBReleaseGroupID
+	}
+	if meta.MBArtistID != "" {
+		txxx["MusicBrainz Artist Id"] = meta.MBArtistID
+	}
+	if meta.MBAlbumArtistID != "" {
+		txxx["MusicBrainz Album Artist Id"] = meta.MBAlbumArtistID
+	}
+	if len(txxx) == 0 && meta.MBRecordingID == "" {
+		return
+	}
+
+	if len(txxx) > 0 {
+		var foreign []id3v2.Framer
+		for _, f := range tag.GetFrames("TXXX") {
+			udf, ok := f.(id3v2.UserDefinedTextFrame)
+			if !ok {
+				foreign = append(foreign, f)
+				continue
+			}
+			if _, managed := txxx[udf.Description]; !managed {
+				foreign = append(foreign, f)
+			}
+		}
+		tag.DeleteFrames("TXXX")
+		for _, f := range foreign {
+			tag.AddFrame("TXXX", f)
+		}
+		for desc, val := range txxx {
+			tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+				Encoding:    id3v2.EncodingUTF8,
+				Description: desc,
+				Value:       val,
+			})
+		}
+	}
+
+	if meta.MBRecordingID != "" {
+		var foreign []id3v2.Framer
+		for _, f := range tag.GetFrames("UFID") {
+			if ufid, ok := f.(id3v2.UFIDFrame); !ok || ufid.OwnerIdentifier != "http://musicbrainz.org" {
+				foreign = append(foreign, f)
+			}
+		}
+		tag.DeleteFrames("UFID")
+		for _, f := range foreign {
+			tag.AddFrame("UFID", f)
+		}
+		tag.AddUFIDFrame(id3v2.UFIDFrame{
+			OwnerIdentifier: "http://musicbrainz.org",
+			Identifier:      []byte(meta.MBRecordingID),
+		})
+	}
 }
 
 func tagWAV(filePath string, meta TrackMeta) error {
@@ -331,4 +439,3 @@ func buildFLACPicture(pic *coverData) *flac.MetaDataBlock {
 	}
 	return block
 }
-

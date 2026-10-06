@@ -341,18 +341,24 @@ func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album
 	}
 	added := 0
 	for _, pt := range albumDetail.Tracks {
-		if _, err := s.queries.FindTrackByProvider(providerName, pt.Id); err == nil {
+		if t, err := s.queries.FindTrackByProvider(providerName, pt.Id); err == nil {
+			// Backfill the recording id onto rows created before providers
+			// exposed it.
+			if recID := pt.Metadata["recording_id"]; recID != "" {
+				_ = s.queries.SetTrackMBRecordingID(t.ID, recID)
+			}
 			continue
 		}
 		s.queries.CreateTrack(&models.Track{
-			AlbumID:     album.ID,
-			Title:       pt.Title,
-			TrackNumber: int(pt.TrackNumber),
-			DiscNumber:  int(pt.DiscNumber),
-			DurationMs:  int(pt.DurationMs),
-			Provider:    providerName,
-			ProviderID:  pt.Id,
-			Status:      models.TrackStatusWanted,
+			AlbumID:       album.ID,
+			Title:         pt.Title,
+			TrackNumber:   int(pt.TrackNumber),
+			DiscNumber:    int(pt.DiscNumber),
+			DurationMs:    int(pt.DurationMs),
+			Provider:      providerName,
+			ProviderID:    pt.Id,
+			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
+			Status:        models.TrackStatusWanted,
 		})
 		added++
 	}
@@ -388,14 +394,15 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 	tracks := 0
 	for _, pt := range albumDetail.Tracks {
 		if err := s.queries.CreateTrack(&models.Track{
-			AlbumID:     album.ID,
-			Title:       pt.Title,
-			TrackNumber: int(pt.TrackNumber),
-			DiscNumber:  int(pt.DiscNumber),
-			DurationMs:  int(pt.DurationMs),
-			Provider:    providerName,
-			ProviderID:  pt.Id,
-			Status:      models.TrackStatusWanted,
+			AlbumID:       album.ID,
+			Title:         pt.Title,
+			TrackNumber:   int(pt.TrackNumber),
+			DiscNumber:    int(pt.DiscNumber),
+			DurationMs:    int(pt.DurationMs),
+			Provider:      providerName,
+			ProviderID:    pt.Id,
+			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
+			Status:        models.TrackStatusWanted,
 		}); err == nil {
 			tracks++
 		}

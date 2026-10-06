@@ -151,9 +151,11 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 	for _, pt := range detail.Tracks {
 		if canon := byID[pt.Id]; canon != nil {
 			used[canon.ID] = true
-			// A stale duplicate may sit under another release's track id — the
-			// release-independent recording id folds it into the canonical row.
 			if recID := pt.Metadata["recording_id"]; recID != "" {
+				// Stamp the recording id if the row predates us storing it.
+				_ = s.queries.SetTrackMBRecordingID(canon.ID, recID)
+				// A stale duplicate may sit under another release's track id —
+				// the release-independent recording id folds it in.
 				if dup := matchByRecording(byRecording[recID], used, canon.ID, pt); dup != nil {
 					used[dup.ID] = true
 					if err := s.queries.AbsorbTrack(canon.ID, dup.ID); err != nil {
@@ -188,14 +190,15 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 			continue
 		}
 		if err := s.queries.CreateTrack(&models.Track{
-			AlbumID:     albumID,
-			Title:       pt.Title,
-			TrackNumber: int(pt.TrackNumber),
-			DiscNumber:  int(pt.DiscNumber),
-			DurationMs:  int(pt.DurationMs),
-			Provider:    providerName,
-			ProviderID:  pt.Id,
-			Status:      models.TrackStatusWanted,
+			AlbumID:       albumID,
+			Title:         pt.Title,
+			TrackNumber:   int(pt.TrackNumber),
+			DiscNumber:    int(pt.DiscNumber),
+			DurationMs:    int(pt.DurationMs),
+			Provider:      providerName,
+			ProviderID:    pt.Id,
+			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
+			Status:        models.TrackStatusWanted,
 		}); err != nil {
 			slog.Error("sync: create wanted track", "album", title, "track", pt.Title, "error", err)
 		} else {

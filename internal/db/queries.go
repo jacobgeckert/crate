@@ -248,6 +248,15 @@ func (q *Queries) AbsorbTrack(dstID, srcID int64) error {
 	return tx.Commit()
 }
 
+// SetTrackMBRecordingID fills in a missing MusicBrainz recording id — rows
+// created before the provider exposed it get stamped on the next sync.
+func (q *Queries) SetTrackMBRecordingID(id int64, recordingID string) error {
+	_, err := q.db.Exec(
+		`UPDATE tracks SET mb_recording_id = COALESCE(mb_recording_id, ?), updated_at = ? WHERE id = ?`,
+		recordingID, now(), id)
+	return err
+}
+
 func (q *Queries) RelinkTrack(id int64, provider, providerID string) error {
 	_, err := q.db.Exec(`UPDATE tracks SET provider = ?, provider_id = ?, updated_at = ? WHERE id = ?`,
 		provider, providerID, now(), id)
@@ -391,9 +400,9 @@ func (q *Queries) UpdateTrackStatusByAlbum(albumID int64, from, to models.TrackS
 func (q *Queries) CreateTrack(t *models.Track) error {
 	ts := now()
 	result, err := q.db.Exec(
-		`INSERT INTO tracks (album_id, title, track_number, disc_number, duration_ms, provider, provider_id, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.AlbumID, t.Title, t.TrackNumber, t.DiscNumber, t.DurationMs, t.Provider, t.ProviderID, t.Status, ts, ts,
+		`INSERT INTO tracks (album_id, title, track_number, disc_number, duration_ms, provider, provider_id, status, mb_recording_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.AlbumID, t.Title, t.TrackNumber, t.DiscNumber, t.DurationMs, t.Provider, t.ProviderID, t.Status, t.MBRecordingID, ts, ts,
 	)
 	if err != nil {
 		return err
@@ -616,7 +625,7 @@ func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 	err := q.db.QueryRow(
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
-		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
+		        t.download_format, t.download_bitrate, t.mb_recording_id, t.created_at, t.updated_at,
 		        al.title, ar.name
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
@@ -624,7 +633,7 @@ func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 		 WHERE t.id = ?`, id,
 	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
 		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
-		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
+		&t.DownloadFormat, &t.DownloadBitrate, &t.MBRecordingID, &t.CreatedAt, &t.UpdatedAt,
 		&t.AlbumTitle, &t.ArtistName)
 	if err != nil {
 		return nil, err

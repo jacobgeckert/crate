@@ -101,7 +101,7 @@ func (s *Service) Organize(track *models.Track) error {
 	if album.CoverURL != nil {
 		coverURL = *album.CoverURL
 	}
-	if err := tagger.Tag(dest, tagger.TrackMeta{
+	tagMeta := tagger.TrackMeta{
 		Title:       track.Title,
 		Artist:      artist.Name,
 		Album:       album.Title,
@@ -109,7 +109,23 @@ func (s *Service) Organize(track *models.Track) error {
 		DiscNumber:  track.DiscNumber,
 		Year:        year,
 		CoverURL:    coverURL,
-	}); err != nil {
+	}
+	// Stamp MusicBrainz identity when the entity is anchored to it — makes the
+	// file self-identifying for re-imports and MB-aware players.
+	if track.Provider == "musicbrainz" {
+		tagMeta.MBTrackID = track.ProviderID
+		if track.MBRecordingID != nil {
+			tagMeta.MBRecordingID = *track.MBRecordingID
+		}
+	}
+	if album.Provider == "musicbrainz" {
+		tagMeta.MBReleaseGroupID = album.ProviderID
+	}
+	if artist.Provider == "musicbrainz" {
+		tagMeta.MBAlbumArtistID = artist.ProviderID
+		tagMeta.MBArtistID = artist.ProviderID
+	}
+	if err := tagger.Tag(dest, tagMeta); err != nil {
 		slog.Warn("organizer: tagging failed", "dest", dest, "error", err)
 	}
 

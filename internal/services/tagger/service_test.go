@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	id3v2 "github.com/bogem/id3v2/v2"
-	flac "github.com/go-flac/go-flac"
 	"github.com/go-flac/flacvorbis"
+	flac "github.com/go-flac/go-flac"
 )
 
 func TestReadAllUnderLimit(t *testing.T) {
@@ -319,6 +319,215 @@ func TestTagMP3_PreservesForeignFrames(t *testing.T) {
 	}
 }
 
+// TestTagMP3_MusicBrainzFrames verifies the MB identity frames land where the
+// importer (and Picard/AcoustID) expect: TXXX for release-scoped ids, UFID
+// (owner http://musicbrainz.org) for the recording id.
+func TestTagMP3_MusicBrainzFrames(t *testing.T) {
+	dir := t.TempDir()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:            "Control Burns",
+		Artist:           "156/Silence",
+		Album:            "From a Distance",
+		TrackNumber:      1,
+		MBRecordingID:    "rec-uuid",
+		MBTrackID:        "reltrack-uuid",
+		MBReleaseGroupID: "rg-uuid",
+		MBArtistID:       "artist-uuid",
+		MBAlbumArtistID:  "artist-uuid",
+	}
+	if err := tagMP3(mp3Path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+
+	got := map[string]string{}
+	for _, f := range tag.GetFrames("TXXX") {
+		if udf, ok := f.(id3v2.UserDefinedTextFrame); ok {
+			got[strings.ToLower(udf.Description)] = udf.Value
+		}
+	}
+	want := map[string]string{
+		"musicbrainz release track id": "reltrack-uuid",
+		"musicbrainz release group id": "rg-uuid",
+		"musicbrainz artist id":        "artist-uuid",
+		"musicbrainz album artist id":  "artist-uuid",
+	}
+	for desc, val := range want {
+		if got[desc] != val {
+			t.Errorf("TXXX %q = %q, want %q", desc, got[desc], val)
+		}
+	}
+
+	var recID string
+	for _, f := range tag.GetFrames(tag.CommonID("Unique file identifier")) {
+		if ufid, ok := f.(id3v2.UFIDFrame); ok && ufid.OwnerIdentifier == "http://musicbrainz.org" {
+			recID = string(ufid.Identifier)
+		}
+	}
+	if recID != "rec-uuid" {
+		t.Errorf("UFID musicbrainz.org = %q, want %q", recID, "rec-uuid")
+	}
+}
+
+// TestTagMP3_MBRewritePreservesForeign: foreign TXXX/UFID frames (AcoustID,
+// other tools) survive; a stale Crate-written MB frame is replaced, not
+// duplicated; foreign MB fields we don't manage stay untouched.
+func TestTagMP3_MBRewritePreservesForeign(t *testing.T) {
+	dir := t.TempDir()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	seed, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: "Acoustid Id",
+		Value:       "acoustid-uuid-1234",
+	})
+	seed.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: "MusicBrainz Album Id",
+		Value:       "release-uuid-foreign",
+	})
+	seed.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: "MusicBrainz Release Track Id",
+		Value:       "stale-reltrack-uuid",
+	})
+	seed.AddUFIDFrame(id3v2.UFIDFrame{
+		OwnerIdentifier: "http://example.com/other",
+		Identifier:      []byte("foreign-ufid"),
+	})
+	seed.AddUFIDFrame(id3v2.UFIDFrame{
+		OwnerIdentifier: "http://musicbrainz.org",
+		Identifier:      []byte("stale-rec-uuid"),
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
+	}
+	seed.Close()
+
+	meta := TrackMeta{
+		Title: "T", Artist: "A", Album: "B", TrackNumber: 1,
+		MBRecordingID: "rec-uuid",
+		MBTrackID:     "reltrack-uuid",
+	}
+	if err := tagMP3(mp3Path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+
+	var acoustid, albumID, relTracks []string
+	for _, f := range tag.GetFrames("TXXX") {
+		udf, ok := f.(id3v2.UserDefinedTextFrame)
+		if !ok {
+			continue
+		}
+		switch udf.Description {
+		case "Acoustid Id":
+			acoustid = append(acoustid, udf.Value)
+		case "MusicBrainz Album Id":
+			albumID = append(albumID, udf.Value)
+		case "MusicBrainz Release Track Id":
+			relTracks = append(relTracks, udf.Value)
+		}
+	}
+	if len(acoustid) != 1 || acoustid[0] != "acoustid-uuid-1234" {
+		t.Errorf("Acoustid Id = %v, want preserved", acoustid)
+	}
+	if len(albumID) != 1 || albumID[0] != "release-uuid-foreign" {
+		t.Errorf("MusicBrainz Album Id (foreign, unmanaged) = %v, want preserved", albumID)
+	}
+	if len(relTracks) != 1 || relTracks[0] != "reltrack-uuid" {
+		t.Errorf("MusicBrainz Release Track Id = %v, want [reltrack-uuid] (stale replaced)", relTracks)
+	}
+
+	var foreignUFID, mbUFID int
+	for _, f := range tag.GetFrames(tag.CommonID("Unique file identifier")) {
+		if ufid, ok := f.(id3v2.UFIDFrame); ok {
+			if ufid.OwnerIdentifier == "http://musicbrainz.org" {
+				mbUFID++
+				if string(ufid.Identifier) != "rec-uuid" {
+					t.Errorf("MB UFID = %q, want rec-uuid", string(ufid.Identifier))
+				}
+			} else {
+				foreignUFID++
+			}
+		}
+	}
+	if foreignUFID != 1 {
+		t.Errorf("foreign UFID count = %d, want 1 preserved", foreignUFID)
+	}
+	if mbUFID != 1 {
+		t.Errorf("MB UFID count = %d, want exactly 1 (stale replaced)", mbUFID)
+	}
+}
+
+// TestTagMP3_NoMBFields: a non-MusicBrainz track must not gain MB frames —
+// and any foreign MB frames already present stay untouched.
+func TestTagMP3_NoMBFields(t *testing.T) {
+	dir := t.TempDir()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	seed, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed.AddUFIDFrame(id3v2.UFIDFrame{
+		OwnerIdentifier: "http://musicbrainz.org",
+		Identifier:      []byte("foreign-rec-uuid"),
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
+	}
+	seed.Close()
+
+	if err := tagMP3(mp3Path, TrackMeta{Title: "T", Artist: "A", Album: "B", TrackNumber: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+
+	var mbUFID int
+	for _, f := range tag.GetFrames(tag.CommonID("Unique file identifier")) {
+		if ufid, ok := f.(id3v2.UFIDFrame); ok && ufid.OwnerIdentifier == "http://musicbrainz.org" {
+			mbUFID++
+			if string(ufid.Identifier) != "foreign-rec-uuid" {
+				t.Errorf("foreign MB UFID = %q, want untouched", string(ufid.Identifier))
+			}
+		}
+	}
+	if mbUFID != 1 {
+		t.Errorf("MB UFID count = %d, want the seeded one preserved", mbUFID)
+	}
+}
+
 func TestTagFLAC_AllFields(t *testing.T) {
 	dir := t.TempDir()
 	flacPath := filepath.Join(dir, "test.flac")
@@ -431,6 +640,117 @@ func TestTagFLAC_PreservesForeignTags(t *testing.T) {
 	}
 	if c := get("COMMENT"); len(c) != 0 {
 		t.Errorf("expected no COMMENT field (crate: tag dropped), got %v", c)
+	}
+}
+
+// TestTagFLAC_MusicBrainzFields verifies all five MUSICBRAINZ_* Vorbis
+// comments are written, matching the field names the importer reads.
+func TestTagFLAC_MusicBrainzFields(t *testing.T) {
+	dir := t.TempDir()
+	flacPath := filepath.Join(dir, "test.flac")
+	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:            "Control Burns",
+		Artist:           "156/Silence",
+		Album:            "From a Distance",
+		TrackNumber:      1,
+		MBRecordingID:    "rec-uuid",
+		MBTrackID:        "reltrack-uuid",
+		MBReleaseGroupID: "rg-uuid",
+		MBArtistID:       "artist-uuid",
+		MBAlbumArtistID:  "artist-uuid",
+	}
+	if err := tagFLAC(flacPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := flac.ParseFile(flacPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, block := range f.Meta {
+		if block.Type != flac.VorbisComment {
+			continue
+		}
+		cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check := func(field, want string) {
+			vals, _ := cmt.Get(field)
+			if len(vals) == 0 || vals[0] != want {
+				t.Errorf("%s = %v, want %q", field, vals, want)
+			}
+		}
+		check("MUSICBRAINZ_TRACKID", "rec-uuid")
+		check("MUSICBRAINZ_RELEASETRACKID", "reltrack-uuid")
+		check("MUSICBRAINZ_RELEASEGROUPID", "rg-uuid")
+		check("MUSICBRAINZ_ARTISTID", "artist-uuid")
+		check("MUSICBRAINZ_ALBUMARTISTID", "artist-uuid")
+	}
+}
+
+// TestTagFLAC_MBPartialAndForeign: only fields we have values for are
+// stripped-and-rewritten — a seeded recording id we have no replacement for
+// survives, a stale release-track id is replaced, and unmanaged MB fields
+// (MUSICBRAINZ_ALBUMID) stay untouched.
+func TestTagFLAC_MBPartialAndForeign(t *testing.T) {
+	dir := t.TempDir()
+	flacPath := filepath.Join(dir, "test.flac")
+	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := flac.ParseFile(flacPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := flacvorbis.New()
+	seed.Add("MUSICBRAINZ_TRACKID", "existing-rec-uuid")
+	seed.Add("MUSICBRAINZ_RELEASETRACKID", "stale-reltrack-uuid")
+	seed.Add("MUSICBRAINZ_ALBUMID", "release-uuid-foreign")
+	seedBlock := seed.Marshal()
+	f.Meta = append(f.Meta, &seedBlock)
+	if err := f.Save(flacPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// No recording id in meta → existing one preserved; release-track id
+	// present → stale one replaced.
+	meta := TrackMeta{Title: "T", Artist: "A", Album: "B", TrackNumber: 1, MBTrackID: "reltrack-uuid"}
+	if err := tagFLAC(flacPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	f2, err := flac.ParseFile(flacPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmt *flacvorbis.MetaDataBlockVorbisComment
+	for _, block := range f2.Meta {
+		if block.Type == flac.VorbisComment {
+			cmt, _ = flacvorbis.ParseFromMetaDataBlock(*block)
+		}
+	}
+	if cmt == nil {
+		t.Fatal("no vorbis comment block after tagging")
+	}
+	get := func(field string) []string {
+		v, _ := cmt.Get(field)
+		return v
+	}
+
+	if got := get("MUSICBRAINZ_TRACKID"); len(got) != 1 || got[0] != "existing-rec-uuid" {
+		t.Errorf("MUSICBRAINZ_TRACKID = %v, want existing value preserved (no replacement)", got)
+	}
+	if got := get("MUSICBRAINZ_RELEASETRACKID"); len(got) != 1 || got[0] != "reltrack-uuid" {
+		t.Errorf("MUSICBRAINZ_RELEASETRACKID = %v, want [reltrack-uuid] (stale replaced)", got)
+	}
+	if got := get("MUSICBRAINZ_ALBUMID"); len(got) != 1 || got[0] != "release-uuid-foreign" {
+		t.Errorf("MUSICBRAINZ_ALBUMID (unmanaged) = %v, want preserved", got)
 	}
 }
 
