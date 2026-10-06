@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { formatDuration, formatTotalDuration, formatFileSize } from '../lib/format';
+import { formatDuration, formatTotalDuration, formatFileSize, providerAlbumUrl, PROVIDER_LABEL } from '../lib/format';
 import FilterBar from '../components/FilterBar';
 import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import ProviderBadge from '../components/ProviderBadge';
@@ -314,6 +314,19 @@ export default function AlbumDetail() {
             )}
           </div>
         </div>
+        {providerAlbumUrl(album.provider, album.provider_id) && (
+          <a
+            href={providerAlbumUrl(album.provider, album.provider_id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded-lg transition-colors shrink-0 text-zinc-500 bg-zinc-800 active:bg-zinc-700"
+            title={`View on ${PROVIDER_LABEL[album.provider] ?? album.provider}`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </a>
+        )}
         <button
           onClick={() => { if (album.status === 'ignored') { unignoreAlbum.mutate(); } else { ignoreAlbum.mutate(); } }}
           disabled={ignoreAlbum.isPending || unignoreAlbum.isPending}

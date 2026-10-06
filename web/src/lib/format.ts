@@ -54,3 +54,13 @@ export const PROVIDER_LABEL: Record<string, string> = {
 export function providerArtistUrl(provider: string, providerId: string): string | undefined {
   return PROVIDER_ARTIST_URL[provider]?.(providerId);
 }
+
+const PROVIDER_ALBUM_URL: Record<string, (id: string) => string> = {
+  // Album provider ids are release-group ids in the MusicBrainz namespace.
+  musicbrainz: (id) => `https://musicbrainz.org/release-group/${id}`,
+  deezer: (id) => `https://www.deezer.com/album/${id}`,
+};
+
+export function providerAlbumUrl(provider: string, providerId: string): string | undefined {
+  return PROVIDER_ALBUM_URL[provider]?.(providerId);
+}
