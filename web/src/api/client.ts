@@ -72,6 +72,11 @@ export const api = {
     }),
   refreshArtist: (id: number) =>
     request<{ status: string; reconciling: boolean }>(`/artists/${id}/refresh`, { method: 'POST' }),
+  setArtistsNewReleases: (ids: number[], enabled: boolean) =>
+    request<{ updated: number }>(`/artists/new-releases`, {
+      method: 'PUT',
+      body: JSON.stringify({ ids, enabled }),
+    }),
 
   unwatchArtist: (id: number) =>
     request<void>(`/artists/${id}`, { method: 'DELETE' }),

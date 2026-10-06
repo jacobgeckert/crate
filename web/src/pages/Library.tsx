@@ -1,11 +1,12 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import AlphabetRail from '../components/AlphabetRail';
 import FilterBar from '../components/FilterBar';
 import ProgressBar from '../components/ProgressBar';
 import { formatRelativeDate } from '../lib/format';
+import { useToast } from '../components/Toast';
 import type { Artist } from '../types/index';
 
 type LibrarySort = 'az' | 'recent';
@@ -21,8 +22,12 @@ const PROVIDER_LABEL: Record<string, string> = {
 };
 
 export default function Library() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState('');
   const [debouncedFilter, setDebouncedFilter] = useState('');
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [sort, setSort] = useState<LibrarySort>(
     () => (sessionStorage.getItem('library-sort') as LibrarySort) || 'az',
   );
@@ -74,6 +79,39 @@ export default function Library() {
     setSort(s);
     sessionStorage.setItem('library-sort', s);
   };
+
+  const bulkWatch = useMutation({
+    mutationFn: ({ ids, enabled }: { ids: number[]; enabled: boolean }) =>
+      api.setArtistsNewReleases(ids, enabled),
+    onSuccess: (res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      toast(
+        vars.enabled
+          ? `Watching ${res.updated} artist(s) for new releases`
+          : `Stopped watching ${res.updated} artist(s)`,
+        'success',
+      );
+      setSelected(new Set());
+      setSelecting(false);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const rowProps = (artist: Artist) => ({
+    selecting,
+    selected: selected.has(artist.id),
+    onSelect: () => toggleSelect(artist.id),
+  });
+
   const scrollRestored = useRef(false);
 
   useEffect(() => {
@@ -144,6 +182,17 @@ export default function Library() {
             placeholder="Filter by artist or song title..."
           />
         </div>
+        <button
+          onClick={() => {
+            setSelecting((v) => !v);
+            setSelected(new Set());
+          }}
+          className={`px-2.5 py-2 rounded-lg text-xs font-medium shrink-0 transition-colors ${
+            selecting ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-800/60 text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          Select
+        </button>
         <div className="flex rounded-lg bg-zinc-800/60 p-0.5 shrink-0">
           {(['az', 'recent'] as const).map((s) => (
             <button
@@ -172,6 +221,7 @@ export default function Library() {
                 key={artist.id}
                 artist={artist}
                 addedLabel={formatRelativeDate(artist.created_at)}
+                {...rowProps(artist)}
               />
             ))}
           </div>
@@ -190,22 +240,80 @@ export default function Library() {
                   artist={artist}
                   matchCount={matchCountByArtist?.get(artist.id)}
                   isTrackMatch={!!matchedArtistIds?.has(artist.id) && !artist.name.toLowerCase().includes(debouncedFilter.toLowerCase())}
+                  {...rowProps(artist)}
                 />
               ))}
             </div>
           </div>
         ))}
       </div>
+
+      {selecting && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40">
+          <button
+            onClick={() => setSelected(new Set(filteredArtists.map((a) => a.id)))}
+            className="text-xs text-zinc-400 hover:text-zinc-200 px-1"
+          >
+            All
+          </button>
+          <span className="text-xs text-zinc-500 whitespace-nowrap">{selected.size} selected</span>
+          <button
+            onClick={() => bulkWatch.mutate({ ids: [...selected], enabled: true })}
+            disabled={selected.size === 0 || bulkWatch.isPending}
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-medium disabled:opacity-40 whitespace-nowrap"
+          >
+            Watch
+          </button>
+          <button
+            onClick={() => bulkWatch.mutate({ ids: [...selected], enabled: false })}
+            disabled={selected.size === 0 || bulkWatch.isPending}
+            className="px-2.5 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-xs font-medium disabled:opacity-40 whitespace-nowrap"
+          >
+            Unwatch
+          </button>
+          <button
+            onClick={() => {
+              setSelecting(false);
+              setSelected(new Set());
+            }}
+            className="px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function ArtistRow({ artist, matchCount, isTrackMatch, addedLabel }: { artist: Artist; matchCount?: number; isTrackMatch?: boolean; addedLabel?: string }) {
-  return (
-    <Link
-      to={`/artist/${artist.id}`}
-      className="flex items-center gap-3 bg-zinc-800/40 rounded-lg p-2.5 active:bg-zinc-800 transition-colors"
-    >
+function ArtistRow({
+  artist,
+  matchCount,
+  isTrackMatch,
+  addedLabel,
+  selecting,
+  selected,
+  onSelect,
+}: {
+  artist: Artist;
+  matchCount?: number;
+  isTrackMatch?: boolean;
+  addedLabel?: string;
+  selecting?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
+}) {
+  const inner = (
+    <>
+      {selecting && (
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={onSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="accent-emerald-500 shrink-0"
+        />
+      )}
       <div className="w-11 h-11 rounded-full bg-zinc-700 overflow-hidden shrink-0">
         {artist.image_url ? (
           <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" />
@@ -226,7 +334,12 @@ function ArtistRow({ artist, matchCount, isTrackMatch, addedLabel }: { artist: A
           </div>
         )}
       </div>
-      {PROVIDER_ARTIST_URL[artist.provider] && (
+      {artist.watch_new_releases && (
+        <svg className="w-3.5 h-3.5 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" />
+        </svg>
+      )}
+      {!selecting && PROVIDER_ARTIST_URL[artist.provider] && (
         <button
           onClick={(e) => {
             e.preventDefault();
@@ -252,7 +365,31 @@ function ArtistRow({ artist, matchCount, isTrackMatch, addedLabel }: { artist: A
         </span>
       )}
       <StatusBadge status={artist.status} />
-      <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+      {!selecting && (
+        <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+      )}
+    </>
+  );
+
+  if (selecting) {
+    return (
+      <button
+        onClick={onSelect}
+        className={`w-full flex items-center gap-3 rounded-lg p-2.5 text-left transition-colors ${
+          selected ? 'bg-emerald-900/30 ring-1 ring-emerald-800/60' : 'bg-zinc-800/40 active:bg-zinc-800'
+        }`}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <Link
+      to={`/artist/${artist.id}`}
+      className="flex items-center gap-3 bg-zinc-800/40 rounded-lg p-2.5 active:bg-zinc-800 transition-colors"
+    >
+      {inner}
     </Link>
   );
 }

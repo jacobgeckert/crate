@@ -634,6 +634,32 @@ func (s *Server) handleToggleNewReleases(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]bool{"watch_new_releases": req.Enabled})
 }
 
+// handleBulkNewReleases applies the new-release watch toggle to many artists
+// at once, using the same per-artist semantics as handleToggleNewReleases.
+func (s *Server) handleBulkNewReleases(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs     []int64 `json:"ids"`
+		Enabled bool    `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > 500 {
+		writeError(w, http.StatusBadRequest, "ids must contain 1-500 entries")
+		return
+	}
+
+	updated := 0
+	for _, id := range req.IDs {
+		if err := s.queries.SetArtistWatchNewReleases(id, req.Enabled); err == nil {
+			updated++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int{"updated": updated})
+}
+
 func (s *Server) handleUnwatchArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
