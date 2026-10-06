@@ -5,11 +5,17 @@ import { api } from '../api/client';
 import AlphabetRail from '../components/AlphabetRail';
 import FilterBar from '../components/FilterBar';
 import ProgressBar from '../components/ProgressBar';
+import { formatRelativeDate } from '../lib/format';
 import type { Artist } from '../types/index';
+
+type LibrarySort = 'az' | 'recent';
 
 export default function Library() {
   const [filter, setFilter] = useState('');
   const [debouncedFilter, setDebouncedFilter] = useState('');
+  const [sort, setSort] = useState<LibrarySort>(
+    () => (sessionStorage.getItem('library-sort') as LibrarySort) || 'az',
+  );
 
   const { data: artists, isLoading } = useQuery({
     queryKey: ['artists'],
@@ -50,6 +56,14 @@ export default function Library() {
 
   const grouped = useMemo(() => groupByLetter(filteredArtists), [filteredArtists]);
   const activeLetters = useMemo(() => new Set(grouped.map((g) => g.letter)), [grouped]);
+  const recentArtists = useMemo(
+    () => [...filteredArtists].sort((a, b) => b.created_at.localeCompare(a.created_at) || a.name.localeCompare(b.name)),
+    [filteredArtists],
+  );
+  const setSortPersist = (s: LibrarySort) => {
+    setSort(s);
+    sessionStorage.setItem('library-sort', s);
+  };
   const scrollRestored = useRef(false);
 
   useEffect(() => {
@@ -108,23 +122,51 @@ export default function Library() {
     <div className="relative">
       <h2 className="text-lg font-bold mb-3">Watchlist</h2>
 
-      <FilterBar
-        value={filter}
-        onChange={(v) => {
-          setFilter(v);
-          setDebouncedFilter(v);
-        }}
-        debounceMs={300}
-        placeholder="Filter by artist or song title..."
-      />
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <FilterBar
+            value={filter}
+            onChange={(v) => {
+              setFilter(v);
+              setDebouncedFilter(v);
+            }}
+            debounceMs={300}
+            placeholder="Filter by artist or song title..."
+          />
+        </div>
+        <div className="flex rounded-lg bg-zinc-800/60 p-0.5 shrink-0">
+          {(['az', 'recent'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSortPersist(s)}
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                sort === s ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {s === 'az' ? 'A–Z' : 'Recent'}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <AlphabetRail activeLetters={activeLetters} />
+      {sort === 'az' && <AlphabetRail activeLetters={activeLetters} />}
 
-      <div className="pr-5">
+      <div className={sort === 'az' ? 'pr-5' : ''}>
         {debouncedFilter && filteredArtists.length === 0 && (
           <p className="text-zinc-500 text-sm text-center py-6">No matches</p>
         )}
-        {grouped.map(({ letter, artists: group }) => (
+        {sort === 'recent' && (
+          <div className="space-y-1">
+            {recentArtists.map((artist) => (
+              <ArtistRow
+                key={artist.id}
+                artist={artist}
+                addedLabel={formatRelativeDate(artist.created_at)}
+              />
+            ))}
+          </div>
+        )}
+        {sort === 'az' && grouped.map(({ letter, artists: group }) => (
           <div key={letter} id={`section-${letter}`}>
             {grouped.length > 1 && (
               <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1 first:mt-0 scroll-mt-4">
@@ -148,7 +190,7 @@ export default function Library() {
   );
 }
 
-function ArtistRow({ artist, matchCount, isTrackMatch }: { artist: Artist; matchCount?: number; isTrackMatch?: boolean }) {
+function ArtistRow({ artist, matchCount, isTrackMatch, addedLabel }: { artist: Artist; matchCount?: number; isTrackMatch?: boolean; addedLabel?: string }) {
   return (
     <Link
       to={`/artist/${artist.id}`}
@@ -169,6 +211,7 @@ function ArtistRow({ artist, matchCount, isTrackMatch }: { artist: Artist; match
           <p className="text-[11px] text-zinc-500 mt-0.5">{matchCount} matching track{matchCount > 1 ? 's' : ''}</p>
         ) : (
           <div className="mt-0.5">
+            {addedLabel && <p className="text-[11px] text-zinc-500 mb-0.5">Added {addedLabel}</p>}
             <ProgressBar owned={artist.owned_tracks ?? 0} total={artist.total_tracks ?? 0} />
           </div>
         )}

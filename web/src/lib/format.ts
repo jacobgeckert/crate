@@ -29,3 +29,14 @@ export function formatSpeed(bps: number): string {
   if (bps >= 1_000) return `${(bps / 1_000).toFixed(0)} KB/s`;
   return `${bps.toFixed(0)} B/s`;
 }
+
+export function formatRelativeDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
