@@ -544,6 +544,29 @@ func (q *Queries) RejectTrack(id int64) error {
 	return err
 }
 
+// ListAlbumDownloadSources returns the distinct slskd users that have served
+// (or are serving) tracks on an album — used to bias scoring toward keeping an
+// album on one source.
+func (q *Queries) ListAlbumDownloadSources(albumID int64) ([]string, error) {
+	rows, err := q.db.Query(
+		`SELECT DISTINCT downloaded_from FROM tracks WHERE album_id = ? AND downloaded_from IS NOT NULL AND downloaded_from != ''`, albumID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 	t := &models.Track{}
 	err := q.db.QueryRow(

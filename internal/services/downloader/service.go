@@ -308,6 +308,12 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 
 	cfg := s.getScoringConfig()
 	cfg.excludeNegative = true
+	if users, err := s.queries.ListAlbumDownloadSources(track.AlbumID); err == nil && len(users) > 0 {
+		cfg.preferredUsers = make(map[string]bool, len(users))
+		for _, u := range users {
+			cfg.preferredUsers[u] = true
+		}
+	}
 	best := pickBestFile(search.Responses, track, s.queries, cfg)
 	if best == nil {
 		_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
@@ -322,6 +328,7 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 		"username", best.username,
 		"filename", best.file.Filename,
 		"track_id", track.ID,
+		"album_source", cfg.preferredUsers[best.username],
 	)
 	s.logActivity("download_started", "track", track.ID,
 		fmt.Sprintf("Downloading from %s: %s", best.username, filepath.Base(best.file.Filename)))
@@ -704,6 +711,9 @@ func scoreCandidates(results []slskd.SearchResult, track *models.Track, ac avail
 				freeSlotBonus = 10
 			}
 			score += freeSlotBonus + queueScore(result.QueueLength)
+			if cfg.preferredUsers[result.Username] {
+				score += sameUserBonus
+			}
 
 			candidates = append(candidates, candidate{
 				username:    result.Username,
@@ -798,7 +808,15 @@ type scoringConfig struct {
 	// includeAll disables the title/artist/format filters so manual search can
 	// surface every file slskd returned (still scored and annotated, never dropped).
 	includeAll bool
+	// preferredUsers are peers already serving other tracks on the same album —
+	// their files get a bonus so an album tends to come from one source.
+	preferredUsers map[string]bool
 }
+
+// sameUserBonus is strong enough to keep an album on one peer across one
+// quality-tier gap (25) plus availability bonuses, but a two-tier drop still
+// falls back to the better file elsewhere.
+const sameUserBonus = 30
 
 func pickBestFile(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) *candidate {
 	cfg.requireArtist = true

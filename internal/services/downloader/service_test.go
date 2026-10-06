@@ -837,3 +837,66 @@ func TestScoreCandidatesIncludeAllKeepsUnsupportedFormat(t *testing.T) {
 		t.Fatalf("includeAll should keep unsupported-format files, got %d", len(scored))
 	}
 }
+
+func TestPickBestFilePrefersSameAlbumUser(t *testing.T) {
+	// A peer already serving the album wins a one-tier quality gap, so the
+	// album consolidates on one source.
+	results := []slskd.SearchResult{
+		{
+			Username: "user1",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.flac", Size: 30000000},
+			},
+		},
+		{
+			Username: "user2",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+	}
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	cfg := scoringConfig{fallbackEnabled: true, preferredUsers: map[string]bool{"user2": true}}
+
+	best := pickBestFile(results, track, nil, cfg)
+	if best == nil {
+		t.Fatal("expected a result")
+	}
+	if best.username != "user2" {
+		t.Errorf("expected preferred user2, got %s", best.username)
+	}
+}
+
+func TestPickBestFilePreferredUserLosesTwoTierGap(t *testing.T) {
+	// But stickiness has limits: a two-tier drop still falls back to the
+	// better-quality source.
+	tiers := []models.QualityTier{
+		{Format: "flac"},
+		{Format: "mp3", MinBitrate: 320},
+		{Format: "mp3", MinBitrate: 192},
+	}
+	results := []slskd.SearchResult{
+		{
+			Username: "user1",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.flac", Size: 30000000},
+			},
+		},
+		{
+			Username: "user2",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.mp3", Size: 6000000, BitRate: 192},
+			},
+		},
+	}
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	cfg := scoringConfig{tiers: tiers, preferredUsers: map[string]bool{"user2": true}}
+
+	best := pickBestFile(results, track, nil, cfg)
+	if best == nil {
+		t.Fatal("expected a result")
+	}
+	if best.username != "user1" {
+		t.Errorf("expected quality to win a two-tier gap, got %s", best.username)
+	}
+}
