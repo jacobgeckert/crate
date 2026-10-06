@@ -125,19 +125,29 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 	// Tracks created under an ignored album stay ignored — a wanted track under
 	// an ignored album would still get auto-queued.
 	trackStatus := models.TrackStatusWanted
+	fetchID := albumProviderID
 	if album, err := s.queries.GetAlbum(albumID); err == nil && album != nil {
 		title = album.Title
 		if album.Status == models.AlbumStatusIgnored {
 			trackStatus = models.TrackStatusIgnored
 		}
+		// A pinned edition overrides the release-group's default tracklist.
+		fetchID = album.TracklistID()
 	}
 
-	detail, err := s.providers.GetAlbum(ctx, providerName, albumProviderID)
+	detail, err := s.providers.GetAlbum(ctx, providerName, fetchID)
 	if err != nil {
-		slog.Error("sync: failed to fetch release tracklist", "album", title, "provider", providerName, "provider_id", albumProviderID, "error", err)
+		slog.Error("sync: failed to fetch release tracklist", "album", title, "provider", providerName, "provider_id", fetchID, "error", err)
 		return
 	}
+	s.foldAlbumTracks(providerName, albumID, title, trackStatus, detail, false)
+}
 
+// foldAlbumTracks folds a fetched provider tracklist into an album's rows.
+// When prune is set (explicit edition switch), provider-linked rows that match
+// nothing in the new listing and aren't owned or in-flight are deleted — they
+// belonged to the previous edition.
+func (s *Server) foldAlbumTracks(providerName string, albumID int64, title string, trackStatus models.TrackStatus, detail *pb.AlbumDetail, prune bool) (added, matched, merged, pruned int) {
 	existing, err := s.queries.ListTracksByAlbum(albumID)
 	if err != nil {
 		slog.Error("sync: list tracks", "album", title, "error", err)
@@ -160,7 +170,6 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 		}
 	}
 	used := make(map[int64]bool)
-	matched, merged, added := 0, 0, 0
 
 	for _, pt := range detail.Tracks {
 		if canon := byID[pt.Id]; canon != nil {
@@ -219,9 +228,27 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 			added++
 		}
 	}
-	if added > 0 || matched > 0 || merged > 0 {
-		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged)
+
+	if prune {
+		// Provider rows that matched nothing in the new listing are leftovers
+		// from the previous edition. Owned/in-flight ones are kept — the file
+		// still exists — everything else is removed (queue rows cascade).
+		for pid, t := range byID {
+			if used[t.ID] || t.Status == models.TrackStatusOwned || t.Status == models.TrackStatusDownloading {
+				continue
+			}
+			if err := s.queries.DeleteTrack(t.ID); err != nil {
+				slog.Error("sync: prune stale track", "album", title, "track", t.Title, "provider_id", pid, "error", err)
+			} else {
+				pruned++
+			}
+		}
 	}
+
+	if added > 0 || matched > 0 || merged > 0 || pruned > 0 {
+		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged, "stale_pruned", pruned)
+	}
+	return
 }
 
 // matchByRecording returns the best unused candidate sharing pt's

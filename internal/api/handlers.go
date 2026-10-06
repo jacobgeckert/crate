@@ -342,7 +342,8 @@ func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, alb
 }
 
 func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album *models.Album) {
-	albumDetail, err := s.providers.GetAlbum(ctx, providerName, album.ProviderID)
+	// A pinned edition overrides the release-group's default tracklist.
+	albumDetail, err := s.providers.GetAlbum(ctx, providerName, album.TracklistID())
 	if err != nil {
 		slog.Error("sync: failed to fetch release tracklist", "album", album.Title, "provider", providerName, "error", err)
 		return

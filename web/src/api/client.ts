@@ -1,4 +1,4 @@
-import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus } from '../types/index';
 
 const BASE = '/api';
 
@@ -94,6 +94,13 @@ export const api = {
   unwatchTrack: (id: number) =>
     request<void>(`/tracks/${id}`, { method: 'DELETE' }),
 
+  getAlbumEditions: (id: number) =>
+    request<{ editions: AlbumEdition[]; current?: string }>(`/albums/${id}/editions`),
+  setAlbumEdition: (id: number, releaseId: string | null) =>
+    request<{ release_id?: string; matched: number; added: number; pruned: number }>(`/albums/${id}/edition`, {
+      method: 'PUT',
+      body: JSON.stringify({ release_id: releaseId }),
+    }),
   ignoreAlbum: (id: number) =>
     request<void>(`/albums/${id}/ignore`, { method: 'PUT' }),
   unignoreAlbum: (id: number) =>

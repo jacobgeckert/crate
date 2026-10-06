@@ -78,11 +78,22 @@ type Album struct {
 	CoverURL    *string     `json:"cover_url,omitempty" db:"cover_url"`
 	RecordType  string      `json:"record_type" db:"record_type"`
 	ReleaseDate *string     `json:"release_date,omitempty" db:"release_date"`
+	ReleaseID   *string     `json:"release_id,omitempty" db:"release_id"`
 	Status      AlbumStatus `json:"status" db:"status"`
 	CreatedAt   string      `json:"created_at" db:"created_at"`
 	UpdatedAt   string      `json:"updated_at" db:"updated_at"`
 	ArtistName  string      `json:"artist_name,omitempty"`
 	Tracks      []Track     `json:"tracks,omitempty"`
+}
+
+// TracklistID is the provider id to fetch this album's tracklist from — the
+// pinned edition when the user picked one, else the release-group (the
+// provider's default pick).
+func (a *Album) TracklistID() string {
+	if a.ReleaseID != nil && *a.ReleaseID != "" {
+		return *a.ReleaseID
+	}
+	return a.ProviderID
 }
 
 type Track struct {

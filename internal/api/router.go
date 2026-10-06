@@ -120,6 +120,8 @@ func (s *Server) setupRouter() chi.Router {
 
 		r.Route("/albums", func(r chi.Router) {
 			r.Get("/{id}", s.handleGetAlbum)
+			r.Get("/{id}/editions", s.handleGetAlbumEditions)
+			r.Put("/{id}/edition", s.handleSetAlbumEdition)
 			r.Post("/{id}/queue", s.handleQueueAlbumTracks)
 			r.Post("/{id}/link", s.handleLinkAlbum)
 			r.Put("/{id}/ignore", s.handleIgnoreAlbum)

@@ -27,11 +27,22 @@ export interface Album {
   cover_url?: string;
   record_type: string;
   release_date?: string;
+  release_id?: string;
   status: 'watched' | 'owned' | 'ignored';
   created_at: string;
   updated_at: string;
   artist_name?: string;
   tracks?: Track[];
+}
+
+export interface AlbumEdition {
+  id: string;
+  title: string;
+  status?: string;
+  date?: string;
+  country?: string;
+  disambiguation?: string;
+  track_count?: number;
 }
 
 export interface Track {

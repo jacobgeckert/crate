@@ -113,6 +113,25 @@ export default function AlbumDetail() {
     },
   });
 
+  // Editions of the album's release-group (MusicBrainz only — other providers
+  // return an empty list and the picker stays hidden).
+  const { data: editions } = useQuery({
+    queryKey: ['album-editions', id],
+    queryFn: () => api.getAlbumEditions(Number(id)),
+    enabled: !!id && !!album && album.provider !== 'local',
+  });
+
+  const setEdition = useMutation({
+    mutationFn: (releaseId: string | null) => api.setAlbumEdition(Number(id), releaseId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      toast(`Release updated — ${res.matched} matched, ${res.added} added, ${res.pruned} removed`, 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   const unignoreTrack = useMutation({
     mutationFn: (trackId: number) => api.unignoreTrack(trackId),
     onSuccess: () => {
@@ -313,6 +332,23 @@ export default function AlbumDetail() {
               </span>
             )}
           </div>
+          {editions && editions.editions.length > 0 && (
+            <select
+              value={album.release_id ?? ''}
+              disabled={setEdition.isPending}
+              onChange={(e) => setEdition.mutate(e.target.value || null)}
+              className="mt-1.5 max-w-full text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-1 disabled:opacity-50"
+              title="Release edition — owned tracks re-anchor to this pressing by recording id"
+            >
+              <option value="">Auto (default release)</option>
+              {editions.editions.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
+                  {e.track_count ? ` (${e.track_count} tracks)` : ''}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {providerAlbumUrl(album.provider, album.provider_id) && (
           <a

@@ -200,7 +200,24 @@ func (f *fakeProvider) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb
 		return &pb.AlbumDetail{
 			Id: "2001", Title: "Album Two", CoverUrl: "http://img/a2.jpg", Year: 2024, ArtistName: "Test Artist",
 			Tracks: []*pb.TrackInfo{
-				{Id: "3002", Title: "Track B1", TrackNumber: 1, DiscNumber: 1, DurationMs: 240000, Rank: 1},
+				{Id: "3002", Title: "Track B1", TrackNumber: 1, DiscNumber: 1, DurationMs: 240000, Rank: 1,
+					Metadata: map[string]string{"recording_id": "rec-b1"}},
+			},
+			Metadata: map[string]string{"releases": `[
+				{"id":"rel-2001-a","title":"Album Two","status":"Official","date":"2024-01-01","country":"US","track_count":1},
+				{"id":"rel-2001-b","title":"Album Two","status":"Official","date":"2024-06-01","country":"JP","disambiguation":"deluxe","track_count":2}
+			]`},
+		}, nil
+	// A pinned edition of Album Two — different release-track ids, same
+	// recording id for B1, plus a bonus track the default edition lacks.
+	case "rel-2001-b":
+		return &pb.AlbumDetail{
+			Id: "rel-2001-b", Title: "Album Two", CoverUrl: "http://img/a2b.jpg", Year: 2024, ArtistName: "Test Artist",
+			Tracks: []*pb.TrackInfo{
+				{Id: "4003", Title: "Track B1", TrackNumber: 1, DiscNumber: 1, DurationMs: 240000, Rank: 1,
+					Metadata: map[string]string{"recording_id": "rec-b1"}},
+				{Id: "4004", Title: "Track B2", TrackNumber: 2, DiscNumber: 1, DurationMs: 200000, Rank: 2,
+					Metadata: map[string]string{"recording_id": "rec-b2"}},
 			},
 		}, nil
 	}
@@ -828,6 +845,88 @@ func TestGetAlbumWithTracks(t *testing.T) {
 	}
 	if album.ArtistName != "Test Artist" {
 		t.Errorf("expected artist_name 'Test Artist', got %q", album.ArtistName)
+	}
+}
+
+// TestSetAlbumEditionReFoldsTracks: pinning an album to a different release
+// inside its release-group re-anchors owned tracks by recording id, creates
+// the edition's extra tracks, and prunes stale rows from the old edition.
+func TestSetAlbumEditionReFoldsTracks(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	var two *models.Album
+	for i := range albums {
+		if albums[i].ProviderID == "2001" {
+			two = &albums[i]
+		}
+	}
+	if two == nil {
+		t.Fatal("Album Two not found")
+	}
+
+	// Editions endpoint lists the release-group's editions.
+	w := env.do("GET", fmt.Sprintf("/api/albums/%d/editions", two.ID), "")
+	if w.Code != 200 {
+		t.Fatalf("editions: expected 200, got %d", w.Code)
+	}
+	editions := decode[struct {
+		Editions []struct {
+			ID         string `json:"id"`
+			Country    string `json:"country"`
+			TrackCount int    `json:"track_count"`
+		} `json:"editions"`
+		Current *string `json:"current"`
+	}](t, w)
+	if len(editions.Editions) != 2 || editions.Editions[1].ID != "rel-2001-b" {
+		t.Fatalf("editions = %+v, want rel-2001-a + rel-2001-b", editions.Editions)
+	}
+	if editions.Current != nil {
+		t.Errorf("current edition = %v, want nil (auto)", *editions.Current)
+	}
+
+	// Seed: B1 owned with a file, plus a stale provider row the new edition
+	// doesn't carry — it should be pruned, while owned rows are never pruned.
+	bTracks, _ := env.queries.ListTracksByAlbum(two.ID)
+	env.queries.UpdateTrackStatus(bTracks[0].ID, models.TrackStatusOwned)
+	env.queries.CreateTrack(&models.Track{
+		AlbumID: two.ID, Title: "Ghost Cut", TrackNumber: 9, DiscNumber: 1,
+		Provider: "test", ProviderID: "3999",
+		MBRecordingID: strp("rec-ghost"),
+		Status:        models.TrackStatusIgnored,
+	})
+
+	w = env.do("PUT", fmt.Sprintf("/api/albums/%d/edition", two.ID), `{"release_id": "rel-2001-b"}`)
+	if w.Code != 200 {
+		t.Fatalf("set edition: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	res := decode[struct {
+		Matched int `json:"matched"`
+		Added   int `json:"added"`
+		Pruned  int `json:"pruned"`
+	}](t, w)
+	if res.Matched != 1 || res.Added != 1 || res.Pruned != 1 {
+		t.Errorf("edition result = %+v, want matched=1 added=1 pruned=1", res)
+	}
+
+	album, _ := env.queries.GetAlbum(two.ID)
+	if album.ReleaseID == nil || *album.ReleaseID != "rel-2001-b" {
+		t.Fatalf("release_id = %v, want rel-2001-b", album.ReleaseID)
+	}
+
+	tracks, _ := env.queries.ListTracksByAlbum(two.ID)
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 tracks after edition switch, got %d", len(tracks))
+	}
+	b1 := trackByTitle(t, tracks, "Track B1")
+	if b1.ProviderID != "4003" || b1.Status != models.TrackStatusOwned {
+		t.Errorf("Track B1 = %s/%s %s, want relinked test/4003 still owned", b1.Provider, b1.ProviderID, b1.Status)
+	}
+	b2 := trackByTitle(t, tracks, "Track B2")
+	if b2.ProviderID != "4004" || b2.Status != models.TrackStatusIgnored {
+		t.Errorf("Track B2 = %s/%s %s, want test/4004 ignored (album is ignored)", b2.Provider, b2.ProviderID, b2.Status)
 	}
 }
 

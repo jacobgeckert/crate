@@ -268,9 +268,9 @@ func (q *Queries) RelinkTrack(id int64, provider, providerID string) error {
 func (q *Queries) CreateAlbum(a *models.Album) error {
 	ts := now()
 	result, err := q.db.Exec(
-		`INSERT INTO albums (artist_id, title, year, provider, provider_id, cover_url, record_type, release_date, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ArtistID, a.Title, a.Year, a.Provider, a.ProviderID, a.CoverURL, a.RecordType, a.ReleaseDate, a.Status, ts, ts,
+		`INSERT INTO albums (artist_id, title, year, provider, provider_id, cover_url, record_type, release_date, release_id, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ArtistID, a.Title, a.Year, a.Provider, a.ProviderID, a.CoverURL, a.RecordType, a.ReleaseDate, a.ReleaseID, a.Status, ts, ts,
 	)
 	if err != nil {
 		return err
@@ -313,14 +313,21 @@ func (q *Queries) BackfillAlbumReleaseDate(id int64, date string) error {
 	return err
 }
 
+// SetAlbumReleaseID pins an album to a specific provider release (edition);
+// nil clears the pin so tracklists come from the provider's default pick.
+func (q *Queries) SetAlbumReleaseID(id int64, releaseID *string) error {
+	_, err := q.db.Exec(`UPDATE albums SET release_id = ?, updated_at = ? WHERE id = ?`, releaseID, now(), id)
+	return err
+}
+
 func (q *Queries) GetAlbum(id int64) (*models.Album, error) {
 	a := &models.Album{}
 	err := q.db.QueryRow(
-		`SELECT al.id, al.artist_id, al.title, al.year, al.provider, al.provider_id, al.cover_url, al.record_type, al.status,
+		`SELECT al.id, al.artist_id, al.title, al.year, al.provider, al.provider_id, al.cover_url, al.record_type, al.release_id, al.status,
 		        al.created_at, al.updated_at, ar.name
 		 FROM albums al JOIN artists ar ON ar.id = al.artist_id
 		 WHERE al.id = ?`, id,
-	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.Status,
+	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseID, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt, &a.ArtistName)
 	if err != nil {
 		return nil, err
@@ -330,7 +337,7 @@ func (q *Queries) GetAlbum(id int64) (*models.Album, error) {
 
 func (q *Queries) ListAlbumsByArtist(artistID int64) ([]models.Album, error) {
 	rows, err := q.db.Query(
-		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, status, created_at, updated_at
+		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, release_id, status, created_at, updated_at
 		 FROM albums WHERE artist_id = ? ORDER BY year, title`, artistID,
 	)
 	if err != nil {
@@ -342,7 +349,7 @@ func (q *Queries) ListAlbumsByArtist(artistID int64) ([]models.Album, error) {
 	for rows.Next() {
 		var a models.Album
 		if err := rows.Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType,
-			&a.Status, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.ReleaseID, &a.Status, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		albums = append(albums, a)
@@ -390,9 +397,9 @@ func (q *Queries) ListWantedTrackIDsByAlbum(albumID int64) ([]int64, error) {
 func (q *Queries) FindAlbumByProvider(provider, providerID string) (*models.Album, error) {
 	a := &models.Album{}
 	err := q.db.QueryRow(
-		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, status, created_at, updated_at
+		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, release_id, status, created_at, updated_at
 		 FROM albums WHERE provider = ? AND provider_id = ?`, provider, providerID,
-	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.Status,
+	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseID, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -406,9 +413,9 @@ func (q *Queries) FindAlbumByProvider(provider, providerID string) (*models.Albu
 func (q *Queries) FindAlbumByArtistTitleFold(artistID int64, title string) (*models.Album, error) {
 	a := &models.Album{}
 	err := q.db.QueryRow(
-		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, status, created_at, updated_at
+		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, release_id, status, created_at, updated_at
 		 FROM albums WHERE artist_id = ? AND LOWER(title) = LOWER(?) LIMIT 1`, artistID, title,
-	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.Status,
+	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseID, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err

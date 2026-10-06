@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -211,13 +212,78 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 	return &pb.AlbumList{Albums: albums}, nil
 }
 
+// mbTrack/mbMedia are the shared shape of a release's track listing.
+type mbTrack struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Number    string `json:"number"`
+	Position  int    `json:"position"`
+	Length    int    `json:"length"`
+	Recording struct {
+		ID string `json:"id"`
+	} `json:"recording"`
+}
+
+type mbMedia struct {
+	Position int       `json:"position"`
+	Format   string    `json:"format"`
+	Tracks   []mbTrack `json:"tracks"`
+}
+
+// tracksFromMedia flattens media[].tracks[] into provider track infos.
+// recording_id is release-independent — the same song keeps it across every
+// edition, so it anchors reconcile merges when the imported file was tagged
+// against a different release than the one this tracklist was enumerated from.
+func tracksFromMedia(media []mbMedia) []*pb.TrackInfo {
+	var tracks []*pb.TrackInfo
+	for _, m := range media {
+		for _, t := range m.Tracks {
+			trackNum, _ := strconv.Atoi(t.Number)
+			if trackNum == 0 {
+				trackNum = t.Position
+			}
+			meta := map[string]string{}
+			if t.Recording.ID != "" {
+				meta["recording_id"] = t.Recording.ID
+			}
+			tracks = append(tracks, &pb.TrackInfo{
+				Id:          t.ID,
+				Title:       t.Title,
+				TrackNumber: int32(trackNum),
+				DiscNumber:  int32(m.Position),
+				DurationMs:  int32(t.Length),
+				Rank:        int32(t.Position),
+				Metadata:    meta,
+			})
+		}
+	}
+	return tracks
+}
+
+// editionInfo is one edition of a release-group, shipped in AlbumDetail's
+// releases metadata so the UI can offer an edition picker.
+type editionInfo struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Status         string `json:"status,omitempty"`
+	Date           string `json:"date,omitempty"`
+	Country        string `json:"country,omitempty"`
+	Disambiguation string `json:"disambiguation,omitempty"`
+	TrackCount     int    `json:"track_count,omitempty"`
+}
+
 func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumDetail, error) {
 	var rgResp struct {
 		ID       string `json:"id"`
 		Title    string `json:"title"`
 		Releases []struct {
-			ID   string `json:"id"`
-			Date string `json:"date"`
+			ID             string `json:"id"`
+			Title          string `json:"title"`
+			Status         string `json:"status"`
+			Date           string `json:"date"`
+			Country        string `json:"country"`
+			Disambiguation string `json:"disambiguation"`
+			TrackCount     int    `json:"track-count"`
 		} `json:"releases"`
 		ArtistCredit []struct {
 			Artist struct {
@@ -227,7 +293,13 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 		FirstReleaseDate string `json:"first-release-date"`
 	}
 
-	if err := s.get(ctx, "/release-group/"+req.Id+"?inc=releases+artist-credits&fmt=json", &rgResp); err != nil {
+	err := s.get(ctx, "/release-group/"+req.Id+"?inc=releases+artist-credits&fmt=json", &rgResp)
+	if err != nil {
+		// A release id 404s on the release-group endpoint — the caller is
+		// asking for a specific pinned edition.
+		if isNotFound(err) {
+			return s.getRelease(ctx, req.Id)
+		}
 		return nil, err
 	}
 
@@ -241,49 +313,30 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 	var tracks []*pb.TrackInfo
 	if len(rgResp.Releases) > 0 {
 		releaseID := rgResp.Releases[0].ID
-
 		var relResp struct {
-			Media []struct {
-				Position int `json:"position"`
-				Tracks   []struct {
-					ID        string `json:"id"`
-					Title     string `json:"title"`
-					Number    string `json:"number"`
-					Position  int    `json:"position"`
-					Length    int    `json:"length"`
-					Recording struct {
-						ID string `json:"id"`
-					} `json:"recording"`
-				} `json:"tracks"`
-			} `json:"media"`
+			Media []mbMedia `json:"media"`
 		}
-
 		if err := s.get(ctx, "/release/"+releaseID+"?inc=recordings&fmt=json", &relResp); err == nil {
-			for _, media := range relResp.Media {
-				for _, t := range media.Tracks {
-					trackNum, _ := strconv.Atoi(t.Number)
-					if trackNum == 0 {
-						trackNum = t.Position
-					}
-					// recording_id is release-independent — the same song keeps it
-					// across every edition, so it anchors reconcile merges when the
-					// imported file was tagged against a different release than the
-					// one this tracklist was enumerated from.
-					meta := map[string]string{}
-					if t.Recording.ID != "" {
-						meta["recording_id"] = t.Recording.ID
-					}
-					tracks = append(tracks, &pb.TrackInfo{
-						Id:          t.ID,
-						Title:       t.Title,
-						TrackNumber: int32(trackNum),
-						DiscNumber:  int32(media.Position),
-						DurationMs:  int32(t.Length),
-						Rank:        int32(t.Position),
-						Metadata:    meta,
-					})
-				}
-			}
+			tracks = tracksFromMedia(relResp.Media)
+		}
+	}
+
+	meta := map[string]string{}
+	if len(rgResp.Releases) > 0 {
+		editions := make([]editionInfo, 0, len(rgResp.Releases))
+		for _, r := range rgResp.Releases {
+			editions = append(editions, editionInfo{
+				ID:             r.ID,
+				Title:          r.Title,
+				Status:         r.Status,
+				Date:           r.Date,
+				Country:        r.Country,
+				Disambiguation: r.Disambiguation,
+				TrackCount:     r.TrackCount,
+			})
+		}
+		if b, err := json.Marshal(editions); err == nil {
+			meta["releases"] = string(b)
 		}
 	}
 
@@ -294,6 +347,54 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 		CoverUrl:   "https://coverartarchive.org/release-group/" + rgResp.ID + "/front-250",
 		ArtistName: artistName,
 		Tracks:     tracks,
+		Metadata:   meta,
+	}, nil
+}
+
+// getRelease fetches one specific edition by release id — the path taken when
+// an album is pinned to a release inside its release-group.
+func (s *server) getRelease(ctx context.Context, id string) (*pb.AlbumDetail, error) {
+	var relResp struct {
+		ID           string    `json:"id"`
+		Title        string    `json:"title"`
+		Date         string    `json:"date"`
+		Media        []mbMedia `json:"media"`
+		ArtistCredit []struct {
+			Artist struct {
+				Name string `json:"name"`
+			} `json:"artist"`
+		} `json:"artist-credit"`
+		ReleaseGroup struct {
+			ID               string `json:"id"`
+			FirstReleaseDate string `json:"first-release-date"`
+		} `json:"release-group"`
+	}
+
+	if err := s.get(ctx, "/release/"+id+"?inc=recordings+artist-credits+release-groups&fmt=json", &relResp); err != nil {
+		return nil, err
+	}
+
+	artistName := ""
+	if len(relResp.ArtistCredit) > 0 {
+		artistName = relResp.ArtistCredit[0].Artist.Name
+	}
+
+	year := parseYear(relResp.Date)
+	if year == 0 {
+		year = parseYear(relResp.ReleaseGroup.FirstReleaseDate)
+	}
+
+	return &pb.AlbumDetail{
+		Id:         relResp.ID,
+		Title:      relResp.Title,
+		Year:       int32(year),
+		CoverUrl:   "https://coverartarchive.org/release/" + relResp.ID + "/front-250",
+		ArtistName: artistName,
+		Tracks:     tracksFromMedia(relResp.Media),
+		Metadata: map[string]string{
+			"release_id":       relResp.ID,
+			"release_group_id": relResp.ReleaseGroup.ID,
+		},
 	}, nil
 }
 
@@ -373,10 +474,24 @@ func (s *server) get(ctx context.Context, path string, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("musicbrainz API returned status %d", resp.StatusCode)
+		return statusError{resp.StatusCode}
 	}
 
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// statusError carries the HTTP status so callers can distinguish a 404
+// (wrong entity type — e.g. a release id passed where a release-group was
+// expected) from genuine failures.
+type statusError struct{ code int }
+
+func (e statusError) Error() string {
+	return fmt.Sprintf("musicbrainz API returned status %d", e.code)
+}
+
+func isNotFound(err error) bool {
+	var se statusError
+	return errors.As(err, &se) && se.code == http.StatusNotFound
 }
 
 func parseYear(dateStr string) int {
