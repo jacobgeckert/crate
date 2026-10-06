@@ -51,6 +51,20 @@ const settingsSections = [
   },
 ];
 
+const DEFAULT_RELEASE_TYPES: Record<string, boolean> = {
+  album: true,
+  ep: true,
+  single: true,
+  compilation: true,
+};
+
+const RELEASE_TYPE_LABELS: [string, string][] = [
+  ['album', 'Albums'],
+  ['ep', 'EPs'],
+  ['single', 'Singles'],
+  ['compilation', 'Compilations'],
+];
+
 export default function Settings() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -60,6 +74,7 @@ export default function Settings() {
   const [tiers, setTiers] = useState<QualityTier[]>([]);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState('');
+  const [releaseTypes, setReleaseTypes] = useState<Record<string, boolean>>(DEFAULT_RELEASE_TYPES);
   const [namingPreview, setNamingPreview] = useState<{ path?: string; error?: string }>({});
 
   const { data: settings } = useQuery({
@@ -89,6 +104,11 @@ export default function Settings() {
       if (settings.negative_keywords) {
         try {
           setNegativeKeywords(JSON.parse(settings.negative_keywords));
+        } catch { /* ignore */ }
+      }
+      if (settings.new_release_types) {
+        try {
+          setReleaseTypes({ ...DEFAULT_RELEASE_TYPES, ...JSON.parse(settings.new_release_types) });
         } catch { /* ignore */ }
       }
     }
@@ -130,6 +150,7 @@ export default function Settings() {
       quality_tiers: JSON.stringify(tiers),
       quality_fallback_enabled: form.quality_fallback_enabled ?? 'true',
       negative_keywords: JSON.stringify(negativeKeywords),
+      new_release_types: JSON.stringify(releaseTypes),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
@@ -321,6 +342,26 @@ export default function Settings() {
           </div>
         </SettingsSection>
       ))}
+
+      <SettingsSection title="New Releases">
+        <p className="text-[11px] text-zinc-500 mb-3">
+          Release types the watcher auto-adds for artists with "Watch for new releases" enabled.
+          Unchecked types are skipped when new releases are detected.
+        </p>
+        <div className="space-y-2">
+          {RELEASE_TYPE_LABELS.map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={releaseTypes[key] ?? true}
+                onChange={(e) => setReleaseTypes({ ...releaseTypes, [key]: e.target.checked })}
+                className="w-4 h-4 rounded bg-zinc-800 border-zinc-600 accent-white"
+              />
+              <span className="text-sm text-zinc-300">{label}</span>
+            </label>
+          ))}
+        </div>
+      </SettingsSection>
 
       <SettingsSection title="Quality Tiers">
         <p className="text-[11px] text-zinc-500 mb-3">

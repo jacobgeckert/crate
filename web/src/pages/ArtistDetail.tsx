@@ -9,6 +9,14 @@ import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
 import type { Track, Album, ProviderInfo } from '../types/index';
 
+const ALBUM_TYPE_ORDER = ['album', 'ep', 'single', 'compilation'];
+const ALBUM_TYPE_LABELS: Record<string, string> = {
+  album: 'Albums',
+  ep: 'EPs',
+  single: 'Singles',
+  compilation: 'Compilations',
+};
+
 export default function ArtistDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -179,6 +187,22 @@ export default function ArtistDetail() {
       return album.tracks?.some((t) => t.title.toLowerCase().includes(q)) ?? false;
     });
   }, [artist, trackFilter]);
+
+  const albumGroups = useMemo(() => {
+    const groups = new Map<string, Album[]>();
+    for (const al of filteredAlbums) {
+      const t = al.record_type || 'album';
+      const list = groups.get(t) ?? [];
+      list.push(al);
+      groups.set(t, list);
+    }
+    const known = ALBUM_TYPE_ORDER.filter((t) => groups.has(t));
+    const rest = [...groups.keys()].filter((t) => !ALBUM_TYPE_ORDER.includes(t));
+    return [...known, ...rest].map((t) => ({
+      label: ALBUM_TYPE_LABELS[t] ?? `${t[0].toUpperCase()}${t.slice(1)}s`,
+      albums: groups.get(t)!,
+    }));
+  }, [filteredAlbums]);
 
   if (isLoading) {
     return (
@@ -409,7 +433,7 @@ export default function ArtistDetail() {
 
       {artist.albums && artist.albums.length > 0 && (
         <div>
-          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Albums</p>
+          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Releases</p>
           <FilterBar
             value={trackFilter}
             onChange={setTrackFilter}
@@ -418,8 +442,15 @@ export default function ArtistDetail() {
           {trackFilter && filteredAlbums.length === 0 && (
             <p className="text-zinc-500 text-sm text-center py-4">No matching albums or tracks</p>
           )}
-          <div className="space-y-1">
-            {filteredAlbums.map((album) => (
+          {albumGroups.map((group) => (
+            <div key={group.label}>
+              {albumGroups.length > 1 && (
+                <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1.5 first:mt-0">
+                  {group.label}
+                </p>
+              )}
+              <div className="space-y-1">
+                {group.albums.map((album) => (
               <Link
                 key={album.id}
                 to={`/album/${album.id}`}
@@ -455,8 +486,10 @@ export default function ArtistDetail() {
                 <AlbumStatusSummary album={album} artistProvider={artist.provider} />
                 <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
               </Link>
-            ))}
-          </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

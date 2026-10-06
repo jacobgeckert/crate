@@ -68,7 +68,7 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 1. User searches for an artist (via selected provider's gRPC API, switchable on the fly)
 2. User watches an artist (full discography), album, or individual track
 3. Watched items saved to SQLite with provider + provider_id
-4. Scheduler (configurable interval, default 6h) checks each watched artist's provider for new releases
+4. Scheduler (configurable interval, default 6h) checks each watched artist's provider for new releases — the `new_release_types` setting (JSON: `{"album":true,"ep":true,"single":true,"compilation":true}`, all on by default) filters which release types get auto-added; only auto-detection is filtered, not watch/link/refresh
 5. Downloader processes queue: search slskd → pick best file → download → organize → tag (non-destructive: only Crate's own fields, foreign tags preserved) → notify (Navidrome / Music Assistant rescan)
 6. Track status: `wanted` → `downloading` → `owned`
 

@@ -58,12 +58,34 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
+// newReleaseTypes returns which release types the new-release watcher adds,
+// from the new_release_types setting (JSON object). Missing or malformed
+// settings default to watching everything.
+func (s *Service) newReleaseTypes() map[string]bool {
+	types := map[string]bool{"album": true, "ep": true, "single": true, "compilation": true}
+	v, err := s.queries.GetSetting("new_release_types")
+	if err != nil || v == "" {
+		return types
+	}
+	var m map[string]bool
+	if json.Unmarshal([]byte(v), &m) != nil {
+		return types
+	}
+	for k := range types {
+		if b, ok := m[k]; ok {
+			types[k] = b
+		}
+	}
+	return types
+}
+
 func (s *Service) detectNewReleases(ctx context.Context) {
 	artists, err := s.queries.ListWatchedArtists()
 	if err != nil {
 		slog.Error("scheduler: list watched artists", "error", err)
 		return
 	}
+	watchTypes := s.newReleaseTypes()
 	for _, artist := range artists {
 		if artist.WatchNewReleasesSince == nil {
 			continue
@@ -80,6 +102,9 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 		}
 		added := 0
 		for _, pa := range albumList.Albums {
+			if t := pa.RecordType; t != "" && !watchTypes[t] {
+				continue
+			}
 			if existing, _ := s.queries.FindAlbumByProvider(artist.Provider, pa.Id); existing != nil {
 				continue
 			}
