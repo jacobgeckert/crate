@@ -104,6 +104,15 @@ export default function ArtistDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  // Prefill the link search with the artist's own name the first time the
+  // panel opens — the user usually just picks from the results.
+  const toggleRelinkSearch = (artistName: string) => {
+    setShowRelinkSearch((v) => {
+      if (!v && !relinkQuery) setRelinkQuery(artistName);
+      return !v;
+    });
+  };
+
   // Stop polling once the reconcile has drained (album count stable) or after a
   // ~60s backstop, so the UI settles on the finished discography.
   useEffect(() => {
@@ -221,7 +230,7 @@ export default function ArtistDetail() {
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={() => setShowRelinkSearch(!showRelinkSearch)}
+            onClick={() => toggleRelinkSearch(artist.name)}
             className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors"
             title="Relink to different provider"
           >
@@ -250,7 +259,7 @@ export default function ArtistDetail() {
               <p className="text-[11px] text-amber-300/60">This imported artist isn't tracked yet. Link it to a provider to reveal its full discography and fill in what's missing.</p>
             </div>
             <button
-              onClick={() => setShowRelinkSearch((v) => !v)}
+              onClick={() => toggleRelinkSearch(artist.name)}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-800/40 text-amber-200 active:bg-amber-800/60 transition-colors shrink-0"
             >
               Link

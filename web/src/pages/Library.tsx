@@ -10,6 +10,16 @@ import type { Artist } from '../types/index';
 
 type LibrarySort = 'az' | 'recent';
 
+const PROVIDER_ARTIST_URL: Record<string, (id: string) => string> = {
+  musicbrainz: (id) => `https://musicbrainz.org/artist/${id}`,
+  deezer: (id) => `https://www.deezer.com/artist/${id}`,
+};
+
+const PROVIDER_LABEL: Record<string, string> = {
+  musicbrainz: 'MusicBrainz',
+  deezer: 'Deezer',
+};
+
 export default function Library() {
   const [filter, setFilter] = useState('');
   const [debouncedFilter, setDebouncedFilter] = useState('');
@@ -216,6 +226,21 @@ function ArtistRow({ artist, matchCount, isTrackMatch, addedLabel }: { artist: A
           </div>
         )}
       </div>
+      {PROVIDER_ARTIST_URL[artist.provider] && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.open(PROVIDER_ARTIST_URL[artist.provider](artist.provider_id), '_blank', 'noopener');
+          }}
+          className="text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+          title={`View on ${PROVIDER_LABEL[artist.provider] ?? artist.provider}`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </button>
+      )}
       {artist.provider === 'local' && (
         <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-amber-900/50 text-amber-400">
           not linked
