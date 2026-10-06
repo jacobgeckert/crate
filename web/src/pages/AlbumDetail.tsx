@@ -325,30 +325,30 @@ export default function AlbumDetail() {
             {album.artist_name}{album.year && ` · ${album.year}`}
           </p>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <ProviderBadge provider={album.provider} />
+            <ProviderBadge provider={album.provider} className="h-7" />
             {album.record_type && album.record_type !== 'album' && (
-              <span className="text-[10px] font-medium uppercase text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+              <span className="inline-flex items-center h-7 text-[10px] font-medium uppercase text-zinc-500 bg-zinc-800 px-1.5 rounded">
                 {album.record_type}
               </span>
             )}
+            {editions && editions.editions.length > 0 && (
+              <select
+                value={album.release_id ?? ''}
+                disabled={setEdition.isPending}
+                onChange={(e) => setEdition.mutate(e.target.value || null)}
+                className="h-7 min-w-0 max-w-full text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 disabled:opacity-50"
+                title="Release edition — owned tracks re-anchor to this pressing by recording id"
+              >
+                <option value="">Auto (default release)</option>
+                {editions.editions.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
+                    {e.track_count ? ` (${e.track_count} tracks)` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
-          {editions && editions.editions.length > 0 && (
-            <select
-              value={album.release_id ?? ''}
-              disabled={setEdition.isPending}
-              onChange={(e) => setEdition.mutate(e.target.value || null)}
-              className="mt-1.5 max-w-full text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-1 disabled:opacity-50"
-              title="Release edition — owned tracks re-anchor to this pressing by recording id"
-            >
-              <option value="">Auto (default release)</option>
-              {editions.editions.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
-                  {e.track_count ? ` (${e.track_count} tracks)` : ''}
-                </option>
-              ))}
-            </select>
-          )}
         </div>
         {providerAlbumUrl(album.provider, album.provider_id) && (
           <a

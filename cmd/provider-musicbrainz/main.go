@@ -225,9 +225,10 @@ type mbTrack struct {
 }
 
 type mbMedia struct {
-	Position int       `json:"position"`
-	Format   string    `json:"format"`
-	Tracks   []mbTrack `json:"tracks"`
+	Position   int       `json:"position"`
+	Format     string    `json:"format"`
+	TrackCount int       `json:"track-count"`
+	Tracks     []mbTrack `json:"tracks"`
 }
 
 // tracksFromMedia flattens media[].tracks[] into provider track infos.
@@ -272,18 +273,50 @@ type editionInfo struct {
 	TrackCount     int    `json:"track_count,omitempty"`
 }
 
+// listEditions browses the releases inside a release-group with media included,
+// so each edition carries its real track count (the release-group's embedded
+// releases never include track-count).
+func (s *server) listEditions(ctx context.Context, releaseGroupID string) []editionInfo {
+	var resp struct {
+		Releases []struct {
+			ID             string    `json:"id"`
+			Title          string    `json:"title"`
+			Status         string    `json:"status"`
+			Date           string    `json:"date"`
+			Country        string    `json:"country"`
+			Disambiguation string    `json:"disambiguation"`
+			Media          []mbMedia `json:"media"`
+		} `json:"releases"`
+	}
+	if err := s.get(ctx, "/release?release-group="+releaseGroupID+"&inc=media&fmt=json", &resp); err != nil {
+		return nil
+	}
+	editions := make([]editionInfo, 0, len(resp.Releases))
+	for _, r := range resp.Releases {
+		n := 0
+		for _, m := range r.Media {
+			n += m.TrackCount
+		}
+		editions = append(editions, editionInfo{
+			ID:             r.ID,
+			Title:          r.Title,
+			Status:         r.Status,
+			Date:           r.Date,
+			Country:        r.Country,
+			Disambiguation: r.Disambiguation,
+			TrackCount:     n,
+		})
+	}
+	return editions
+}
+
 func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumDetail, error) {
 	var rgResp struct {
 		ID       string `json:"id"`
 		Title    string `json:"title"`
 		Releases []struct {
-			ID             string `json:"id"`
-			Title          string `json:"title"`
-			Status         string `json:"status"`
-			Date           string `json:"date"`
-			Country        string `json:"country"`
-			Disambiguation string `json:"disambiguation"`
-			TrackCount     int    `json:"track-count"`
+			ID    string `json:"id"`
+			Title string `json:"title"`
 		} `json:"releases"`
 		ArtistCredit []struct {
 			Artist struct {
@@ -322,19 +355,7 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 	}
 
 	meta := map[string]string{}
-	if len(rgResp.Releases) > 0 {
-		editions := make([]editionInfo, 0, len(rgResp.Releases))
-		for _, r := range rgResp.Releases {
-			editions = append(editions, editionInfo{
-				ID:             r.ID,
-				Title:          r.Title,
-				Status:         r.Status,
-				Date:           r.Date,
-				Country:        r.Country,
-				Disambiguation: r.Disambiguation,
-				TrackCount:     r.TrackCount,
-			})
-		}
+	if editions := s.listEditions(ctx, rgResp.ID); len(editions) > 0 {
 		if b, err := json.Marshal(editions); err == nil {
 			meta["releases"] = string(b)
 		}

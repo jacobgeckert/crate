@@ -60,9 +60,16 @@ func (s *Server) handleGetAlbumEditions(w http.ResponseWriter, r *http.Request) 
 	if raw := detail.Metadata["releases"]; raw != "" {
 		_ = json.Unmarshal([]byte(raw), &editions)
 	}
-	if len(editions) == 0 && album.Provider == "musicbrainz" {
-		// Album detail cached before editions metadata existed — the picker
-		// would hide until the TTL expired. Evict and refetch once.
+	hasCounts := false
+	for _, e := range editions {
+		if e.TrackCount > 0 {
+			hasCounts = true
+			break
+		}
+	}
+	if !hasCounts && album.Provider == "musicbrainz" {
+		// Album detail cached before editions/track-count metadata existed —
+		// the picker would hide until the TTL expired. Evict and refetch once.
 		s.cache.Delete(album.Provider + ":album:" + album.ProviderID)
 		if fresh, ferr := s.providers.GetAlbum(ctx, album.Provider, album.ProviderID); ferr == nil {
 			if raw := fresh.Metadata["releases"]; raw != "" {
