@@ -30,9 +30,9 @@ function FileRow({
       <input
         type="checkbox"
         className="mt-1 accent-zinc-400"
-        title="Skip this file"
-        checked={file.skip}
-        onChange={(e) => onToggleSkip(file.id, e.target.checked)}
+        title="Include in commit"
+        checked={!file.skip}
+        onChange={(e) => onToggleSkip(file.id, !e.target.checked)}
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
@@ -151,7 +151,13 @@ export default function Upload() {
     [upload, toast],
   );
 
-  const commitable = batch?.files.filter((f) => f.state === 'identified' && !f.skip && f.match?.track_id) ?? [];
+  // New-album proposals carry provider_track_id (not track_id — the row is
+  // created at commit), so a file is committable if either is present.
+  const commitable =
+    batch?.files.filter(
+      (f) =>
+        f.state === 'identified' && !f.skip && (f.match?.track_id || f.match?.provider_track_id),
+    ) ?? [];
   const hasDuplicates = batch?.files.some((f) => f.match?.duplicate && f.state === 'identified' && !f.skip) ?? false;
   const done = batch && batch.files.every((f) => ['committed', 'skipped', 'failed'].includes(f.state));
 
