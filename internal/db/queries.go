@@ -355,6 +355,38 @@ func (q *Queries) UpdateAlbumStatus(id int64, status models.AlbumStatus) error {
 	return err
 }
 
+// AlbumHasOwnedOrActive reports whether an album has any owned or in-flight
+// tracks — used by sync to decide if a non-owned album may default to ignored
+// without disturbing downloads in progress.
+func (q *Queries) AlbumHasOwnedOrActive(albumID int64) (bool, error) {
+	var has bool
+	err := q.db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM tracks WHERE album_id = ? AND status IN ('owned', 'downloading'))
+		      OR EXISTS(SELECT 1 FROM download_queue d JOIN tracks t ON t.id = d.track_id
+		                WHERE t.album_id = ? AND d.status IN ('pending', 'searching', 'downloading', 'organizing'))`,
+		albumID, albumID).Scan(&has)
+	return has, err
+}
+
+// ListWantedTrackIDsByAlbum returns ids of an album's wanted tracks — used to
+// enqueue them when an album is un-ignored.
+func (q *Queries) ListWantedTrackIDsByAlbum(albumID int64) ([]int64, error) {
+	rows, err := q.db.Query(`SELECT id FROM tracks WHERE album_id = ? AND status = 'wanted'`, albumID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (q *Queries) FindAlbumByProvider(provider, providerID string) (*models.Album, error) {
 	a := &models.Album{}
 	err := q.db.QueryRow(

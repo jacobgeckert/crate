@@ -161,17 +161,21 @@ func TestReconcileLocalArtistPromotion(t *testing.T) {
 		t.Errorf("Bonus Cut = %s/%s, want local/owned (unmatched leftover)", bonus.Provider, bonus.Status)
 	}
 
-	// Album Two: user had none of it — created as a gap, wanted.
+	// Album Two: user had none of it — created as a gap, ignored by default
+	// (non-owned albums aren't wanted until the user un-ignores them).
 	two := albumByTitle(t, albums, "Album Two")
 	if two.Provider != "test" || two.ProviderID != "2001" {
 		t.Errorf("Album Two provider = %s/%s, want test/2001", two.Provider, two.ProviderID)
+	}
+	if two.Status != models.AlbumStatusIgnored {
+		t.Errorf("Album Two status = %s, want ignored", two.Status)
 	}
 	twoTracks, err := q.ListTracksByAlbum(two.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(twoTracks) != 1 || twoTracks[0].Status != models.TrackStatusWanted || twoTracks[0].ProviderID != "3002" {
-		t.Errorf("Album Two tracks = %+v, want one wanted test/3002", twoTracks)
+	if len(twoTracks) != 1 || twoTracks[0].Status != models.TrackStatusIgnored || twoTracks[0].ProviderID != "3002" {
+		t.Errorf("Album Two tracks = %+v, want one ignored test/3002", twoTracks)
 	}
 
 	// Rare Bootleg untouched — the provider doesn't know it, so it stays owned+local.

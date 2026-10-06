@@ -525,9 +525,16 @@ func TestWatchArtistCreatesFullDiscography(t *testing.T) {
 		t.Errorf("expected 3 total tracks, got %d", total)
 	}
 
+	// Synced-but-not-owned albums default to ignored — the user un-ignores the
+	// releases they actually want.
+	for _, a := range albums {
+		if a.Status != models.AlbumStatusIgnored {
+			t.Errorf("album %q has status %q, expected 'ignored'", a.Title, a.Status)
+		}
+	}
 	for _, t2 := range append(tracks1, tracks2...) {
-		if t2.Status != models.TrackStatusWanted {
-			t.Errorf("track %q has status %q, expected 'wanted'", t2.Title, t2.Status)
+		if t2.Status != models.TrackStatusIgnored {
+			t.Errorf("track %q has status %q, expected 'ignored'", t2.Title, t2.Status)
 		}
 	}
 }
@@ -638,10 +645,20 @@ func TestReWatchArtistSkipsIgnoredAlbums(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Ignored album should NOT get tracks re-added
+	// Ignored albums still get their tracklist synced — but tracks come back
+	// as ignored, never wanted, and the album stays ignored.
+	album, _ := env.queries.GetAlbum(albums[0].ID)
+	if album.Status != models.AlbumStatusIgnored {
+		t.Errorf("expected album to stay ignored, got %q", album.Status)
+	}
 	tracksAfterSync, _ := env.queries.ListTracksByAlbum(albums[0].ID)
-	if len(tracksAfterSync) != 0 {
-		t.Errorf("expected 0 tracks for ignored album, got %d", len(tracksAfterSync))
+	if len(tracksAfterSync) == 0 {
+		t.Error("expected tracks re-added for ignored album")
+	}
+	for _, tr := range tracksAfterSync {
+		if tr.Status != models.TrackStatusIgnored {
+			t.Errorf("track %q has status %q, expected 'ignored'", tr.Title, tr.Status)
+		}
 	}
 }
 
@@ -934,6 +951,7 @@ func TestQueueTrackIsIdempotent(t *testing.T) {
 func TestQueueAllWantedTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 
 	w := env.do("POST", "/api/downloads/queue", "")
 	if w.Code != 200 {
@@ -954,6 +972,7 @@ func TestQueueAllWantedTracks(t *testing.T) {
 func TestListDownloadsWithTrackInfo(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 	env.do("POST", "/api/downloads/queue", "")
 
 	w := env.do("GET", "/api/downloads", "")
@@ -975,6 +994,7 @@ func TestListDownloadsWithTrackInfo(t *testing.T) {
 func TestListDownloadsFilterByStatus(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 	env.do("POST", "/api/downloads/queue", "")
 
 	w := env.do("GET", "/api/downloads?status=complete", "")
@@ -993,6 +1013,7 @@ func TestListDownloadsFilterByStatus(t *testing.T) {
 func TestRetryDownload(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 	env.do("POST", "/api/downloads/queue", "")
 
 	downloads, _ := env.queries.ListDownloads("pending")
@@ -1019,6 +1040,7 @@ func TestRetryDownload(t *testing.T) {
 func TestDeleteDownload(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 	env.do("POST", "/api/downloads/queue", "")
 
 	downloads, _ := env.queries.ListDownloads("pending")
@@ -1234,6 +1256,28 @@ func writeImportFixtureMP3(t *testing.T, path, artist, album, title string, trac
 	}
 }
 
+// wantAllAlbums flips every synced album to watched + its tracks to wanted —
+// the state you get after un-ignoring a discography. Sync now defaults
+// non-owned albums to ignored, so tests exercising the queue/download paths
+// need their tracks wanted first.
+func wantAllAlbums(t *testing.T, env *testEnv) {
+	t.Helper()
+	artists, err := env.queries.ListArtists()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artist := range artists {
+		albums, err := env.queries.ListAlbumsByArtist(artist.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range albums {
+			env.queries.UpdateAlbumStatus(a.ID, models.AlbumStatusWatched)
+			env.queries.UpdateTrackStatusByAlbum(a.ID, models.TrackStatusIgnored, models.TrackStatusWanted)
+		}
+	}
+}
+
 func waitForImport(t *testing.T, env *testEnv) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -1307,6 +1351,7 @@ func TestLibraryImportAPI(t *testing.T) {
 func TestStatusEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 	env.do("POST", "/api/downloads/queue", "")
 
 	w := env.do("GET", "/api/status", "")
@@ -1380,6 +1425,7 @@ func TestRelinkArtist(t *testing.T) {
 func TestQueueArtistTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 
 	artists, _ := env.queries.ListArtists()
 	w := env.do("POST", fmt.Sprintf("/api/artists/%d/queue", artists[0].ID), "")
@@ -1401,6 +1447,7 @@ func TestQueueArtistTracks(t *testing.T) {
 func TestQueueAlbumTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 
 	artists, _ := env.queries.ListArtists()
 	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
@@ -1890,6 +1937,7 @@ func TestBrowseArtistTrackSearchEmptyQuery(t *testing.T) {
 func TestClearDownloadsByStatus(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 	env.do("POST", "/api/downloads/queue", "")
 
 	downloads, _ := env.queries.ListDownloads("pending")
@@ -1924,6 +1972,7 @@ func TestClearDownloadsBadStatus(t *testing.T) {
 func TestWantedTracksWithCooldown(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 
 	// All 3 tracks are wanted
 	all, _ := env.queries.ListWantedTracks()
@@ -1956,6 +2005,7 @@ func TestWantedTracksWithCooldown(t *testing.T) {
 func TestWantedTracksLimited(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 
 	all, _ := env.queries.ListWantedTracks()
 	if len(all) != 3 {
@@ -1976,6 +2026,7 @@ func TestWantedTracksLimited(t *testing.T) {
 func TestWantedTracksWithCooldownAndLimit(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+	wantAllAlbums(t, env)
 
 	all, _ := env.queries.ListWantedTracks()
 	env.queries.EnqueueDownload(all[0].ID)

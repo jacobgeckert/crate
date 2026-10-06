@@ -312,25 +312,33 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, albums []*pb.AlbumSummary) {
 	ctx := context.Background()
 	name := fmt.Sprintf("artist %d", artistID)
-	if artist, err := s.queries.GetArtist(artistID); err == nil && artist != nil {
-		name = artist.Name
+	var artist *models.Artist
+	if a, err := s.queries.GetArtist(artistID); err == nil && a != nil {
+		artist = a
+		name = a.Name
 	}
+	watch := s.newReleaseWatchFor(artist)
 	slog.Info("sync: saving watched discography", "artist", name, "provider", providerName, "releases", len(albums))
-	added := 0
+	added, ignored := 0, 0
 	for _, pa := range albums {
 		if existingAlbum, _ := s.queries.FindAlbumByProvider(providerName, pa.Id); existingAlbum != nil {
 			if d := pa.Metadata["release_date"]; d != "" {
 				s.queries.BackfillAlbumReleaseDate(existingAlbum.ID, d)
 			}
-			if existingAlbum.Status != models.AlbumStatusIgnored {
-				s.syncAlbumTracks(ctx, providerName, existingAlbum)
-			}
+			s.syncAlbumTracks(ctx, providerName, existingAlbum)
+			s.demoteUnownedAlbum(existingAlbum)
 			continue
 		}
-		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
+		st := s.saveAlbumFromProvider(ctx, providerName, artistID, pa, watch)
+		if st == "" {
+			continue
+		}
 		added++
+		if st == models.AlbumStatusIgnored {
+			ignored++
+		}
 	}
-	slog.Info("sync: discography saved", "artist", name, "provider", providerName, "added", added)
+	slog.Info("sync: discography saved", "artist", name, "provider", providerName, "added", added, "ignored", ignored)
 }
 
 func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album *models.Album) {
@@ -338,6 +346,12 @@ func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album
 	if err != nil {
 		slog.Error("sync: failed to fetch release tracklist", "album", album.Title, "provider", providerName, "error", err)
 		return
+	}
+	// Tracks created under an ignored album stay ignored — a wanted track
+	// there would still get auto-queued.
+	trackStatus := models.TrackStatusWanted
+	if album.Status == models.AlbumStatusIgnored {
+		trackStatus = models.TrackStatusIgnored
 	}
 	added := 0
 	for _, pt := range albumDetail.Tracks {
@@ -358,7 +372,7 @@ func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album
 			Provider:      providerName,
 			ProviderID:    pt.Id,
 			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
-			Status:        models.TrackStatusWanted,
+			Status:        trackStatus,
 		})
 		added++
 	}
@@ -367,9 +381,19 @@ func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album
 	}
 }
 
-func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string, artistID int64, pa *pb.AlbumSummary) {
+// saveAlbumFromProvider creates a provider release. Newly discovered albums
+// default to ignored — only releases qualifying as watched new releases (the
+// same gate the scheduler's detectNewReleases applies) land wanted. Returns
+// the created album's status, or "" when creation failed.
+func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string, artistID int64, pa *pb.AlbumSummary, watch *newReleaseWatch) models.AlbumStatus {
 	year := intPtrOrNil(int(pa.Year))
 	cover := pa.CoverUrl
+	albumStatus := models.AlbumStatusIgnored
+	trackStatus := models.TrackStatusIgnored
+	if watch != nil && watch.qualifies(pa) {
+		albumStatus = models.AlbumStatusWatched
+		trackStatus = models.TrackStatusWanted
+	}
 	album := &models.Album{
 		ArtistID:    artistID,
 		Title:       pa.Title,
@@ -379,17 +403,17 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 		CoverURL:    strPtrOrNil(cover),
 		RecordType:  pa.RecordType,
 		ReleaseDate: strPtrOrNil(pa.Metadata["release_date"]),
-		Status:      models.AlbumStatusWatched,
+		Status:      albumStatus,
 	}
 	if err := s.queries.CreateAlbum(album); err != nil {
 		slog.Error("sync: failed to create release", "album", pa.Title, "provider", providerName, "error", err)
-		return
+		return ""
 	}
 
 	albumDetail, err := s.providers.GetAlbum(ctx, providerName, pa.Id)
 	if err != nil {
 		slog.Error("sync: failed to fetch tracklist, release saved without tracks", "album", pa.Title, "provider", providerName, "error", err)
-		return
+		return albumStatus
 	}
 	tracks := 0
 	for _, pt := range albumDetail.Tracks {
@@ -402,12 +426,13 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 			Provider:      providerName,
 			ProviderID:    pt.Id,
 			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
-			Status:        models.TrackStatusWanted,
+			Status:        trackStatus,
 		}); err == nil {
 			tracks++
 		}
 	}
-	slog.Info("sync: added release", "album", pa.Title, "type", pa.RecordType, "provider", providerName, "tracks", tracks)
+	slog.Info("sync: added release", "album", pa.Title, "type", pa.RecordType, "provider", providerName, "tracks", tracks, "status", albumStatus)
+	return albumStatus
 }
 
 func (s *Server) handleWatchAlbum(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +814,13 @@ func (s *Server) handleUnignoreAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.queries.UpdateTrackStatusByAlbum(id, models.TrackStatusIgnored, models.TrackStatusWanted)
+	// Un-ignoring means "I want this" — enqueue now rather than waiting for
+	// the scheduler's next wanted-tracks sweep.
+	if ids, err := s.queries.ListWantedTrackIDsByAlbum(id); err == nil && len(ids) > 0 {
+		if n, err := s.queries.EnqueueDownloadBatch(ids); err == nil {
+			slog.Info("unignore: queued tracks for download", "album_id", id, "tracks", n)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "watched"})
 }
 

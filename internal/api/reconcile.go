@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -31,9 +32,12 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	defer cancel()
 
 	name := fmt.Sprintf("artist %d", artistID)
-	if artist, err := s.queries.GetArtist(artistID); err == nil && artist != nil {
-		name = artist.Name
+	var artist *models.Artist
+	if a, err := s.queries.GetArtist(artistID); err == nil && a != nil {
+		artist = a
+		name = a.Name
 	}
+	watch := s.newReleaseWatchFor(artist)
 	slog.Info("sync: starting discography sync", "artist", name, "provider", providerName)
 
 	s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "contacting provider"})
@@ -79,6 +83,7 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 			}
 			// Already ours on this provider — fill any tracks it's newly listing.
 			s.reconcileAlbumTracks(ctx, providerName, a.ID, pa.Id)
+			s.demoteUnownedAlbum(a)
 			continue
 		}
 		if match := matchLocalAlbum(locals, used, pa); match != nil {
@@ -92,11 +97,14 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 				s.queries.BackfillAlbumReleaseDate(match.ID, d)
 			}
 			s.reconcileAlbumTracks(ctx, providerName, match.ID, pa.Id)
+			s.demoteUnownedAlbum(match)
 			continue
 		}
-		// A genuine gap: create the album with every track wanted.
-		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
-		added++
+		// A genuine gap: create the album — wanted when it qualifies as a
+		// watched new release, ignored otherwise.
+		if s.saveAlbumFromProvider(ctx, providerName, artistID, pa, watch) != "" {
+			added++
+		}
 	}
 	s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "syncing releases", Total: total, Done: total})
 
@@ -114,8 +122,14 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 // degenerates to "create the missing wanted tracks", matching the watch path.
 func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, albumID int64, albumProviderID string) {
 	title := fmt.Sprintf("album %d", albumID)
+	// Tracks created under an ignored album stay ignored — a wanted track under
+	// an ignored album would still get auto-queued.
+	trackStatus := models.TrackStatusWanted
 	if album, err := s.queries.GetAlbum(albumID); err == nil && album != nil {
 		title = album.Title
+		if album.Status == models.AlbumStatusIgnored {
+			trackStatus = models.TrackStatusIgnored
+		}
 	}
 
 	detail, err := s.providers.GetAlbum(ctx, providerName, albumProviderID)
@@ -198,9 +212,9 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 			Provider:      providerName,
 			ProviderID:    pt.Id,
 			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
-			Status:        models.TrackStatusWanted,
+			Status:        trackStatus,
 		}); err != nil {
-			slog.Error("sync: create wanted track", "album", title, "track", pt.Title, "error", err)
+			slog.Error("sync: create track", "album", title, "track", pt.Title, "error", err)
 		} else {
 			added++
 		}
@@ -347,4 +361,89 @@ func (s *Server) enrichArtistImage(ctx context.Context, artistID int64) {
 		return
 	}
 	slog.Info("image: artist image updated", "artist", artist.Name, "source", imageProvider)
+}
+
+// newReleaseWatch captures an artist's effective new-release watch config once
+// per sync, so sync-discovered releases can be gated on the same predicate the
+// scheduler's detectNewReleases uses: releases that qualify land wanted, the
+// rest default to ignored.
+type newReleaseWatch struct {
+	watching bool
+	since    time.Time
+	types    map[string]bool
+}
+
+func (s *Server) newReleaseWatchFor(artist *models.Artist) *newReleaseWatch {
+	w := &newReleaseWatch{types: s.globalNewReleaseTypes()}
+	if artist == nil || !artist.WatchNewReleases || artist.WatchNewReleasesSince == nil {
+		return w
+	}
+	w.watching = true
+	w.since, _ = time.Parse(time.RFC3339, *artist.WatchNewReleasesSince)
+	if override, err := s.queries.GetArtistWatchReleaseTypes(artist.ID); err == nil && override != nil {
+		w.types = override
+	}
+	return w
+}
+
+// qualifies mirrors the scheduler's gate: watched type, released on/after the
+// watch start. A missing release date doesn't disqualify (can't prove it's
+// old), matching detectNewReleases.
+func (w *newReleaseWatch) qualifies(pa *pb.AlbumSummary) bool {
+	if !w.watching {
+		return false
+	}
+	if t := pa.RecordType; t != "" && !w.types[t] {
+		return false
+	}
+	if d := pa.Metadata["release_date"]; d != "" {
+		if rd, err := time.Parse("2006-01-02", d); err == nil && rd.Before(w.since) {
+			return false
+		}
+	}
+	return true
+}
+
+// globalNewReleaseTypes mirrors the scheduler's new_release_types setting —
+// missing or malformed means all types watched.
+func (s *Server) globalNewReleaseTypes() map[string]bool {
+	types := map[string]bool{"album": true, "ep": true, "single": true, "compilation": true}
+	v, err := s.queries.GetSetting("new_release_types")
+	if err != nil || v == "" {
+		return types
+	}
+	var m map[string]bool
+	if json.Unmarshal([]byte(v), &m) != nil {
+		return types
+	}
+	for k := range types {
+		if b, ok := m[k]; ok {
+			types[k] = b
+		}
+	}
+	return types
+}
+
+// demoteUnownedAlbum flips a watched album to ignored when sync confirmed it
+// holds nothing owned, downloading, or queued — refresh's default for releases
+// the user hasn't collected. Owned/in-flight albums are never demoted, and
+// already-ignored albums are untouched.
+func (s *Server) demoteUnownedAlbum(album *models.Album) {
+	if album.Status != models.AlbumStatusWatched {
+		return
+	}
+	active, err := s.queries.AlbumHasOwnedOrActive(album.ID)
+	if err != nil {
+		slog.Error("sync: album activity check failed", "album", album.Title, "error", err)
+		return
+	}
+	if active {
+		return
+	}
+	if err := s.queries.UpdateAlbumStatus(album.ID, models.AlbumStatusIgnored); err != nil {
+		slog.Error("sync: ignore album failed", "album", album.Title, "error", err)
+		return
+	}
+	s.queries.UpdateTrackStatusByAlbum(album.ID, models.TrackStatusWanted, models.TrackStatusIgnored)
+	slog.Info("sync: ignored non-owned release", "album", album.Title)
 }
