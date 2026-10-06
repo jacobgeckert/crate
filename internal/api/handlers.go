@@ -272,6 +272,7 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 		s.bgWork.Add(1)
 		go func() {
 			defer s.bgWork.Done()
+			s.enrichArtistImage(context.Background(), existing.ID)
 			s.saveAlbumsFromProvider(primary, existing.ID, albums)
 		}()
 
@@ -301,6 +302,7 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
+		s.enrichArtistImage(context.Background(), artist.ID)
 		s.saveAlbumsFromProvider(primary, artist.ID, albums)
 	}()
 

@@ -120,6 +120,11 @@ func (q *Queries) UpdateArtistStatus(id int64, status models.ArtistStatus) error
 	return err
 }
 
+func (q *Queries) SetArtistImageURL(id int64, url string) error {
+	_, err := q.db.Exec(`UPDATE artists SET image_url = ?, updated_at = ? WHERE id = ?`, url, now(), id)
+	return err
+}
+
 func (q *Queries) SetArtistWatchNewReleases(id int64, enabled bool) error {
 	ts := now()
 	var since *string

@@ -43,6 +43,8 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	}
 	slog.Info("sync: provider returned releases", "artist", name, "provider", providerName, "releases", len(albumList.Albums))
 
+	s.enrichArtistImage(ctx, artistID)
+
 	existing, err := s.queries.ListAlbumsByArtist(artistID)
 	if err != nil {
 		slog.Error("sync: list albums", "artist_id", artistID, "error", err)
@@ -221,4 +223,49 @@ func matchLocalTrack(locals []*models.Track, used map[int64]bool, pt *pb.TrackIn
 
 func foldEqual(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+// enrichArtistImage backfills artist.image_url from Deezer for artists whose
+// own provider (notably MusicBrainz) doesn't serve artist photos. Runs inside
+// background work — never blocks a request. No-ops when the artist already has
+// an image or Deezer isn't healthy.
+func (s *Server) enrichArtistImage(ctx context.Context, artistID int64) {
+	artist, err := s.queries.GetArtist(artistID)
+	if err != nil || artist == nil {
+		return
+	}
+	if artist.ImageURL != nil && *artist.ImageURL != "" {
+		return
+	}
+	const imageProvider = "deezer"
+	if !s.providers.IsHealthy(imageProvider) {
+		return
+	}
+
+	res, err := s.providers.SearchWithProvider(ctx, imageProvider, artist.Name, 5, 0)
+	if err != nil {
+		slog.Warn("image: artist image lookup failed", "artist", artist.Name, "provider", imageProvider, "error", err)
+		return
+	}
+	var pick *pb.ArtistResult
+	for _, a := range res.Artists {
+		if a.ImageUrl == "" {
+			continue
+		}
+		if strings.EqualFold(a.Name, artist.Name) {
+			pick = a
+			break
+		}
+		if pick == nil {
+			pick = a
+		}
+	}
+	if pick == nil {
+		return
+	}
+	if err := s.queries.SetArtistImageURL(artistID, pick.ImageUrl); err != nil {
+		slog.Error("image: save artist image", "artist", artist.Name, "error", err)
+		return
+	}
+	slog.Info("image: artist image updated", "artist", artist.Name, "source", imageProvider)
 }
