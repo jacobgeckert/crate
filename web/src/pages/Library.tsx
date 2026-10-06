@@ -18,6 +18,11 @@ export default function Library() {
   const [debouncedFilter, setDebouncedFilter] = useState('');
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // IDs queued by the bulk-refresh action — the sync-status poll is scoped to
+  // these so stale entries for other artists don't confuse the progress bar.
+  const [refreshIds, setRefreshIds] = useState<number[]>([]);
+  const seenSync = useRef(false);
+  const syncTicks = useRef(0);
   const [sort, setSort] = useState<LibrarySort>(
     () => (sessionStorage.getItem('library-sort') as LibrarySort) || 'az',
   );
@@ -86,6 +91,44 @@ export default function Library() {
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });
+
+  const bulkRefresh = useMutation({
+    mutationFn: (ids: number[]) => api.refreshArtists(ids),
+    onSuccess: (res, ids) => {
+      seenSync.current = false;
+      syncTicks.current = 0;
+      setRefreshIds(res.queued > 0 ? ids : []);
+      toast(`Refreshing ${res.queued} artist(s)`, 'success');
+      setSelected(new Set());
+      setSelecting(false);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  // Poll live sync progress for the artists we just queued; stops when every
+  // one reports inactive (or on a ~5min backstop).
+  const { data: syncStatus } = useQuery({
+    queryKey: ['artist-sync'],
+    queryFn: api.getSyncStatus,
+    enabled: refreshIds.length > 0,
+    refetchInterval: refreshIds.length > 0 ? 2000 : false,
+  });
+  const refreshSync = useMemo(() => {
+    const ids = new Set(refreshIds);
+    return (syncStatus?.items ?? []).filter((i) => ids.has(i.artist_id));
+  }, [syncStatus, refreshIds]);
+
+  useEffect(() => {
+    if (refreshIds.length === 0 || !syncStatus) return;
+    syncTicks.current += 1;
+    if (refreshSync.length > 0) seenSync.current = true;
+    const allDone = seenSync.current && refreshSync.every((i) => !i.active);
+    if (allDone || syncTicks.current > 150) {
+      setRefreshIds([]);
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      if (allDone) toast('Discographies refreshed', 'success');
+    }
+  }, [syncStatus, refreshIds.length, refreshSync, queryClient, toast]);
 
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
@@ -262,6 +305,16 @@ export default function Library() {
             Unwatch
           </button>
           <button
+            onClick={() => bulkRefresh.mutate(
+              filteredArtists.filter((a) => selected.has(a.id) && a.provider !== 'local').map((a) => a.id),
+            )}
+            disabled={!filteredArtists.some((a) => selected.has(a.id) && a.provider !== 'local') || bulkRefresh.isPending}
+            title="Refresh discographies (provider-linked artists only)"
+            className="px-2.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-xs font-medium disabled:opacity-40 whitespace-nowrap"
+          >
+            Refresh
+          </button>
+          <button
             onClick={() => {
               setSelecting(false);
               setSelected(new Set());
@@ -270,6 +323,27 @@ export default function Library() {
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {refreshIds.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40">
+          <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs text-zinc-300 whitespace-nowrap">
+              Refreshing discographies — {refreshSync.filter((i) => !i.active && i.done > 0).length} of {refreshIds.length} artists
+            </p>
+            {(() => {
+              const active = refreshSync.find((i) => i.active);
+              if (!active) return null;
+              const name = filteredArtists.find((a) => a.id === active.artist_id)?.name ?? 'artist';
+              return (
+                <p className="text-[10px] text-zinc-500 truncate">
+                  {name}{active.total > 0 ? ` — ${active.done}/${active.total}` : ''}{active.current ? `: ${active.current}` : ''}
+                </p>
+              );
+            })()}
+          </div>
         </div>
       )}
     </div>

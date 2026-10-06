@@ -1187,9 +1187,18 @@ func (s *Server) handleRefreshArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.startArtistRefresh(artist)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "refreshing", "reconciling": true})
+}
+
+// startArtistRefresh drops the artist's cached provider data and kicks off a
+// background discography reconcile. Caller has already validated the artist is
+// provider-linked and healthy.
+func (s *Server) startArtistRefresh(artist *models.Artist) {
 	s.cache.Delete(artist.Provider + ":artist:" + artist.ProviderID)
 	s.cache.Delete(artist.Provider + ":artist-albums:" + artist.ProviderID)
-	if albums, err := s.queries.ListAlbumsByArtist(id); err == nil {
+	if albums, err := s.queries.ListAlbumsByArtist(artist.ID); err == nil {
 		for _, a := range albums {
 			if a.Provider == artist.Provider {
 				s.cache.Delete(artist.Provider + ":album:" + a.ProviderID)
@@ -1202,8 +1211,65 @@ func (s *Server) handleRefreshArtist(w http.ResponseWriter, r *http.Request) {
 		defer s.bgWork.Done()
 		s.reconcileLocalArtist(artist.Provider, artist.ID, artist.ProviderID)
 	}()
+}
 
-	writeJSON(w, http.StatusAccepted, map[string]any{"status": "refreshing", "reconciling": true})
+// handleBulkRefreshArtists refreshes the discographies of up to 100 selected
+// artists — the same work the artist page's refresh button does, fanned out.
+func (s *Server) handleBulkRefreshArtists(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > 100 {
+		writeError(w, http.StatusBadRequest, "ids must contain 1-100 entries")
+		return
+	}
+
+	queued := 0
+	for _, id := range req.IDs {
+		artist, err := s.queries.GetArtist(id)
+		if err != nil || artist == nil {
+			continue
+		}
+		if artist.Provider == provider.LocalProvider || !s.providers.IsHealthy(artist.Provider) {
+			continue
+		}
+		s.startArtistRefresh(artist)
+		queued++
+	}
+	slog.Info("sync: bulk refresh queued", "artists", queued)
+
+	writeJSON(w, http.StatusAccepted, map[string]int{"queued": queued})
+}
+
+// handleSyncStatus returns every artist's live discography-sync progress — the
+// library page's bulk-refresh banner polls this.
+func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	type syncItem struct {
+		ArtistID int64  `json:"artist_id"`
+		Active   bool   `json:"active"`
+		Phase    string `json:"phase,omitempty"`
+		Total    int    `json:"total"`
+		Done     int    `json:"done"`
+		Current  string `json:"current,omitempty"`
+	}
+	items := []syncItem{}
+	s.syncStatus.Range(func(k, v any) bool {
+		st := v.(*models.SyncInfo)
+		items = append(items, syncItem{
+			ArtistID: k.(int64),
+			Active:   st.Active,
+			Phase:    st.Phase,
+			Total:    st.Total,
+			Done:     st.Done,
+			Current:  st.Current,
+		})
+		return true
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // Settings

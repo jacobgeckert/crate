@@ -318,3 +318,12 @@ export interface UploadCommitResult {
   skipped: number[];
   failed: { file_id: number; error: string }[];
 }
+
+export interface ArtistSyncStatus {
+  artist_id: number;
+  active: boolean;
+  phase?: string;
+  total: number;
+  done: number;
+  current?: string;
+}
