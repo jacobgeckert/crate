@@ -104,6 +104,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/", s.handleListArtists)
 			r.Get("/{id}", s.handleGetArtist)
 			r.Put("/{id}/new-releases", s.handleToggleNewReleases)
+			r.Post("/{id}/refresh", s.handleRefreshArtist)
 			r.Post("/{id}/queue", s.handleQueueArtistTracks)
 			r.Delete("/{id}", s.handleUnwatchArtist)
 		})

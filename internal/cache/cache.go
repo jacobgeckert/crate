@@ -63,6 +63,10 @@ func (c *Cache) Set(key string, value []byte, ttl time.Duration) {
 	)
 }
 
+func (c *Cache) Delete(key string) {
+	c.db.Exec(`DELETE FROM cache WHERE key = ?`, key)
+}
+
 func (c *Cache) Clear() {
 	c.db.Exec(`DELETE FROM cache`)
 }

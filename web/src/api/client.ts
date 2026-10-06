@@ -70,6 +70,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ enabled }),
     }),
+  refreshArtist: (id: number) =>
+    request<{ status: string; reconciling: boolean }>(`/artists/${id}/refresh`, { method: 'POST' }),
 
   unwatchArtist: (id: number) =>
     request<void>(`/artists/${id}`, { method: 'DELETE' }),

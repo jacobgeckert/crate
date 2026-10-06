@@ -1066,6 +1066,49 @@ func (s *Server) handleRelinkEntity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "relinked", "reconciling": reconciling})
 }
 
+// handleRefreshArtist re-syncs a provider-linked artist's discography: the same
+// reconcile the local-import link path runs — new releases are created as
+// wanted, linked albums gain missing tracks, stray local albums fold in.
+// Cached provider responses are dropped first so this always reads fresh data.
+func (s *Server) handleRefreshArtist(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	artist, err := s.queries.GetArtist(id)
+	if err != nil || artist == nil {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	if artist.Provider == provider.LocalProvider {
+		writeError(w, http.StatusConflict, "link the artist to a provider first")
+		return
+	}
+	if !s.providers.IsHealthy(artist.Provider) {
+		writeError(w, http.StatusServiceUnavailable, "provider is unreachable")
+		return
+	}
+
+	s.cache.Delete(artist.Provider + ":artist:" + artist.ProviderID)
+	s.cache.Delete(artist.Provider + ":artist-albums:" + artist.ProviderID)
+	if albums, err := s.queries.ListAlbumsByArtist(id); err == nil {
+		for _, a := range albums {
+			if a.Provider == artist.Provider {
+				s.cache.Delete(artist.Provider + ":album:" + a.ProviderID)
+			}
+		}
+	}
+
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		s.reconcileLocalArtist(artist.Provider, artist.ID, artist.ProviderID)
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "refreshing", "reconciling": true})
+}
+
 // Settings
 
 var sensitiveSettings = map[string]bool{
