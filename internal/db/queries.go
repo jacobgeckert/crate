@@ -204,6 +204,50 @@ func (q *Queries) RelinkAlbum(id int64, provider, providerID string) error {
 	return err
 }
 
+// AbsorbTrack moves a duplicate row's ownership (file, status, download
+// provenance, recording id) onto the canonical provider row dstID, then
+// deletes the duplicate srcID. Used when a file was imported under a different
+// MusicBrainz release's track id than the provider's canonical tracklist.
+func (q *Queries) AbsorbTrack(dstID, srcID int64) error {
+	tx, err := q.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var status string
+	var filePath, dlFrom, dlFile, dlFmt, mbRec sql.NullString
+	var dlBitrate sql.NullInt64
+	var dur int64
+	err = tx.QueryRow(
+		`SELECT status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, duration_ms, mb_recording_id
+		 FROM tracks WHERE id = ?`, srcID,
+	).Scan(&status, &filePath, &dlFrom, &dlFile, &dlFmt, &dlBitrate, &dur, &mbRec)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE tracks SET
+			status = CASE WHEN ? = 'owned' THEN 'owned' ELSE status END,
+			file_path = COALESCE(?, file_path),
+			downloaded_from = COALESCE(?, downloaded_from),
+			downloaded_filename = COALESCE(?, downloaded_filename),
+			download_format = COALESCE(?, download_format),
+			download_bitrate = COALESCE(?, download_bitrate),
+			duration_ms = CASE WHEN duration_ms > 0 THEN duration_ms ELSE ? END,
+			mb_recording_id = COALESCE(mb_recording_id, ?),
+			updated_at = ?
+		 WHERE id = ?`,
+		status, filePath, dlFrom, dlFile, dlFmt, dlBitrate, dur, mbRec, now(), dstID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM tracks WHERE id = ?`, srcID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (q *Queries) RelinkTrack(id int64, provider, providerID string) error {
 	_, err := q.db.Exec(`UPDATE tracks SET provider = ?, provider_id = ?, updated_at = ? WHERE id = ?`,
 		provider, providerID, now(), id)
@@ -461,7 +505,7 @@ func (q *Queries) FindTrackByPath(filePath string) (*models.Track, error) {
 func (q *Queries) ListTracksByAlbum(albumID int64) ([]models.Track, error) {
 	rows, err := q.db.Query(
 		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
-		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, mb_recording_id, created_at, updated_at
 		 FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number`, albumID,
 	)
 	if err != nil {
@@ -474,7 +518,7 @@ func (q *Queries) ListTracksByAlbum(albumID int64) ([]models.Track, error) {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
 			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
-			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.DownloadFormat, &t.DownloadBitrate, &t.MBRecordingID, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		tracks = append(tracks, t)

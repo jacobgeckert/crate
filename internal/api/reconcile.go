@@ -130,23 +130,53 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 		return
 	}
 
-	linked := make(map[string]bool)
+	byID := make(map[string]*models.Track)
+	byRecording := make(map[string][]*models.Track)
 	var locals []*models.Track
 	for i := range existing {
 		t := &existing[i]
 		switch t.Provider {
 		case providerName:
-			linked[t.ProviderID] = true
+			byID[t.ProviderID] = t
 		case provider.LocalProvider:
 			locals = append(locals, t)
 		}
+		if t.MBRecordingID != nil && *t.MBRecordingID != "" {
+			byRecording[*t.MBRecordingID] = append(byRecording[*t.MBRecordingID], t)
+		}
 	}
 	used := make(map[int64]bool)
-	matched, added := 0, 0
+	matched, merged, added := 0, 0, 0
 
 	for _, pt := range detail.Tracks {
-		if linked[pt.Id] {
+		if canon := byID[pt.Id]; canon != nil {
+			used[canon.ID] = true
+			// A stale duplicate may sit under another release's track id — the
+			// release-independent recording id folds it into the canonical row.
+			if recID := pt.Metadata["recording_id"]; recID != "" {
+				if dup := matchByRecording(byRecording[recID], used, canon.ID, pt); dup != nil {
+					used[dup.ID] = true
+					if err := s.queries.AbsorbTrack(canon.ID, dup.ID); err != nil {
+						slog.Error("sync: merge duplicate track", "album", title, "track", pt.Title, "error", err)
+					} else {
+						merged++
+					}
+				}
+			}
 			continue
+		}
+		// Same recording under a different release's track id — the file was
+		// tagged against another edition. Higher confidence than title fold.
+		if recID := pt.Metadata["recording_id"]; recID != "" {
+			if match := matchByRecording(byRecording[recID], used, 0, pt); match != nil {
+				used[match.ID] = true
+				if err := s.queries.RelinkTrack(match.ID, providerName, pt.Id); err != nil {
+					slog.Error("sync: relink track", "album", title, "track", pt.Title, "error", err)
+				} else {
+					matched++
+				}
+				continue
+			}
 		}
 		if match := matchLocalTrack(locals, used, pt); match != nil {
 			used[match.ID] = true
@@ -172,9 +202,28 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 			added++
 		}
 	}
-	if added > 0 || matched > 0 {
-		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched)
+	if added > 0 || matched > 0 || merged > 0 {
+		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged)
 	}
+}
+
+// matchByRecording returns the best unused candidate sharing pt's
+// release-independent recording id — preferring a disc/track-number match when
+// several rows share it. skipID excludes the canonical row itself.
+func matchByRecording(cands []*models.Track, used map[int64]bool, skipID int64, pt *pb.TrackInfo) *models.Track {
+	var any *models.Track
+	for _, t := range cands {
+		if used[t.ID] || t.ID == skipID {
+			continue
+		}
+		if t.TrackNumber == int(pt.TrackNumber) && t.DiscNumber == int(pt.DiscNumber) {
+			return t
+		}
+		if any == nil {
+			any = t
+		}
+	}
+	return any
 }
 
 // albumHasLocalTracks reports whether an album still contains any local-provider

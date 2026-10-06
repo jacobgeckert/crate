@@ -91,7 +91,7 @@ func (s *server) SearchArtists(ctx context.Context, req *pb.SearchRequest) (*pb.
 	}
 
 	var resp struct {
-		Count  int `json:"count"`
+		Count   int `json:"count"`
 		Artists []struct {
 			ID             string `json:"id"`
 			Name           string `json:"name"`
@@ -246,11 +246,14 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 			Media []struct {
 				Position int `json:"position"`
 				Tracks   []struct {
-					ID       string `json:"id"`
-					Title    string `json:"title"`
-					Number   string `json:"number"`
-					Position int    `json:"position"`
-					Length   int    `json:"length"`
+					ID        string `json:"id"`
+					Title     string `json:"title"`
+					Number    string `json:"number"`
+					Position  int    `json:"position"`
+					Length    int    `json:"length"`
+					Recording struct {
+						ID string `json:"id"`
+					} `json:"recording"`
 				} `json:"tracks"`
 			} `json:"media"`
 		}
@@ -262,6 +265,14 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 					if trackNum == 0 {
 						trackNum = t.Position
 					}
+					// recording_id is release-independent — the same song keeps it
+					// across every edition, so it anchors reconcile merges when the
+					// imported file was tagged against a different release than the
+					// one this tracklist was enumerated from.
+					meta := map[string]string{}
+					if t.Recording.ID != "" {
+						meta["recording_id"] = t.Recording.ID
+					}
 					tracks = append(tracks, &pb.TrackInfo{
 						Id:          t.ID,
 						Title:       t.Title,
@@ -269,6 +280,7 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 						DiscNumber:  int32(media.Position),
 						DurationMs:  int32(t.Length),
 						Rank:        int32(t.Position),
+						Metadata:    meta,
 					})
 				}
 			}
@@ -293,9 +305,9 @@ func (s *server) SearchArtistTracks(ctx context.Context, req *pb.ArtistTrackSear
 
 	var resp struct {
 		Recordings []struct {
-			ID     string `json:"id"`
-			Title  string `json:"title"`
-			Length int    `json:"length"`
+			ID       string `json:"id"`
+			Title    string `json:"title"`
+			Length   int    `json:"length"`
 			Releases []struct {
 				ID           string `json:"id"`
 				Title        string `json:"title"`
