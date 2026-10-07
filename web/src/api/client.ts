@@ -195,6 +195,13 @@ export const api = {
   getUploadBatch: (batch: string) => request<UploadBatch>(`/uploads/${batch}`),
   identifyUpload: (batch: string) =>
     request<UploadBatch>(`/uploads/${batch}/identify`, { method: 'POST' }),
+  getUploadEditions: (batch: string, provider: string, id: string) =>
+    request<{ editions: AlbumEdition[] }>(`/uploads/${batch}/editions?provider=${encodeURIComponent(provider)}&id=${encodeURIComponent(id)}`),
+  setUploadRelease: (batch: string, provider: string, providerId: string, releaseId: string | null) =>
+    request<UploadBatch>(`/uploads/${batch}/release`, {
+      method: 'PUT',
+      body: JSON.stringify({ provider, provider_id: providerId, release_id: releaseId }),
+    }),
   patchUploadFile: (batch: string, fileId: number, body: { track_id?: number; skip?: boolean }) =>
     request<{ status: string }>(`/uploads/${batch}/files/${fileId}`, {
       method: 'PATCH',

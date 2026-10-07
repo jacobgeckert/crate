@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/upload"
 )
 
 // Uploads
@@ -176,6 +178,69 @@ func (s *Server) handleCommitUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// handleGetUploadEditions lists the editions of a provider album that isn't in
+// the library yet — the edition picker on the upload review page. Provider
+// albums already in the library use GET /albums/{id}/editions instead.
+func (s *Server) handleGetUploadEditions(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	providerName := r.URL.Query().Get("provider")
+	id := r.URL.Query().Get("id")
+	if providerName == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "provider and id are required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	editions, err := s.uploads.Editions(ctx, providerName, id)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "provider fetch failed")
+		return
+	}
+	if editions == nil {
+		editions = []upload.AlbumEdition{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"editions": editions})
+}
+
+// handleSetUploadRelease pins a release (edition) for one provider album
+// inside a batch — re-matching each of its files against that edition's
+// tracklist. release_id null clears the pin back to the group default.
+func (s *Server) handleSetUploadRelease(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeError(w, http.StatusServiceUnavailable, "uploads not configured")
+		return
+	}
+	var req struct {
+		Provider   string  `json:"provider"`
+		ProviderID string  `json:"provider_id"`
+		ReleaseID  *string `json:"release_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Provider == "" || req.ProviderID == "" {
+		writeError(w, http.StatusBadRequest, "provider and provider_id are required")
+		return
+	}
+	batch := chi.URLParam(r, "batch")
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	if err := s.uploads.SetGroupRelease(ctx, batch, req.Provider, req.ProviderID, req.ReleaseID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	view, err := s.uploads.Batch(batch)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load batch")
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleDiscardUpload(w http.ResponseWriter, r *http.Request) {

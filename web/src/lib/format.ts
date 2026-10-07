@@ -65,6 +65,15 @@ export function providerAlbumUrl(provider: string, providerId: string): string |
   return PROVIDER_ALBUM_URL[provider]?.(providerId);
 }
 
+// Release-level (edition) URLs — distinct from the release-group album URLs.
+const PROVIDER_RELEASE_URL: Record<string, (id: string) => string> = {
+  musicbrainz: (id) => `https://musicbrainz.org/release/${id}`,
+};
+
+export function providerReleaseUrl(provider: string, id: string): string | undefined {
+  return PROVIDER_RELEASE_URL[provider]?.(id);
+}
+
 export function recordTypeLabel(recordType: string): string {
   const t = recordType || 'album';
   if (t === 'ep') return 'EP';

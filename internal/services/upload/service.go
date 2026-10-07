@@ -22,6 +22,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/organizer"
+	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
 )
 
 const musicbrainzProvider = "musicbrainz"
@@ -33,7 +34,22 @@ type AlbumRef struct {
 	Provider   string `json:"provider"`
 	ProviderID string `json:"provider_id"`
 	Title      string `json:"title"`
-	New        bool   `json:"new"`
+	// ReleaseID pins a specific edition inside the release-group (a
+	// MusicBrainz release id); empty means the provider's default release.
+	ReleaseID string `json:"release_id,omitempty"`
+	New       bool   `json:"new"`
+}
+
+// AlbumEdition is one release inside a release-group, as surfaced by the
+// provider's album metadata — the upload page's edition picker.
+type AlbumEdition struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Status         string `json:"status,omitempty"`
+	Date           string `json:"date,omitempty"`
+	Country        string `json:"country,omitempty"`
+	Disambiguation string `json:"disambiguation,omitempty"`
+	TrackCount     int    `json:"track_count,omitempty"`
 }
 
 // Match is the proposed destination for one staged file.
@@ -272,7 +288,7 @@ func trackMatch(t *models.Track, album *models.Album, confidence, reason string)
 	m := &Match{
 		TrackID:    t.ID,
 		TrackTitle: t.Title,
-		Album:      &AlbumRef{ID: album.ID, Provider: album.Provider, ProviderID: album.ProviderID, Title: album.Title},
+		Album:      &AlbumRef{ID: album.ID, Provider: album.Provider, ProviderID: album.ProviderID, Title: album.Title, ReleaseID: deref(album.ReleaseID)},
 		Confidence: confidence,
 		Reason:     reason,
 	}
@@ -303,10 +319,83 @@ func (s *Service) matchInAlbum(album *models.Album, fm *importer.FileMeta) *Matc
 		return trackMatch(t, album, confidence, reason)
 	}
 	return &Match{
-		Album:      &AlbumRef{ID: album.ID, Provider: album.Provider, ProviderID: album.ProviderID, Title: album.Title},
+		Album:      &AlbumRef{ID: album.ID, Provider: album.Provider, ProviderID: album.ProviderID, Title: album.Title, ReleaseID: deref(album.ReleaseID)},
 		Confidence: "low",
 		Reason:     "album matched but no track matched",
 	}
+}
+
+// Editions lists the releases inside a provider album's release-group — the
+// edition picker for albums a batch would create.
+func (s *Service) Editions(ctx context.Context, providerName, providerID string) ([]AlbumEdition, error) {
+	detail, err := s.providers.GetAlbum(ctx, providerName, providerID)
+	if err != nil || detail == nil {
+		return nil, fmt.Errorf("provider album lookup failed")
+	}
+	var editions []AlbumEdition
+	if raw := detail.Metadata["releases"]; raw != "" {
+		_ = json.Unmarshal([]byte(raw), &editions)
+	}
+	return editions, nil
+}
+
+// matchProviderTrack applies the recording-id → release-track-id → title
+// ladder against a provider tracklist.
+func matchProviderTrack(tracks []*pb.TrackInfo, fm *importer.FileMeta) (id, title, confidence, reason string) {
+	if fm.MBRecordingID != "" {
+		for _, pt := range tracks {
+			if pt.Metadata["recording_id"] == fm.MBRecordingID {
+				return pt.Id, pt.Title, "high", "musicbrainz recording id"
+			}
+		}
+	}
+	if fm.MBTrackID != "" {
+		for _, pt := range tracks {
+			if pt.Id == fm.MBTrackID {
+				return pt.Id, pt.Title, "high", "musicbrainz track id"
+			}
+		}
+	}
+	for _, pt := range tracks {
+		if strings.EqualFold(pt.Title, fm.Title) {
+			confidence, reason := "medium", "title match"
+			if durationMismatch(int(pt.DurationMs), fm.DurationMs) {
+				confidence, reason = "low", "title match, duration differs"
+			}
+			return pt.Id, pt.Title, confidence, reason
+		}
+	}
+	return "", "", "", ""
+}
+
+// taggedEdition returns the release id the file's own tags point at when it's
+// a member of this release-group — Picard-tagged uploads pin their edition
+// automatically instead of defaulting to the group's first release.
+func taggedEdition(detail *pb.AlbumDetail, fm *importer.FileMeta) string {
+	if fm.MBReleaseID == "" {
+		return ""
+	}
+	if raw := detail.Metadata["releases"]; raw != "" {
+		var editions []AlbumEdition
+		if json.Unmarshal([]byte(raw), &editions) == nil {
+			for _, e := range editions {
+				if e.ID == fm.MBReleaseID {
+					return fm.MBReleaseID
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// albumDetailFor returns the album detail whose tracklist should drive
+// matching/creation — the pinned edition's own release detail when set.
+func (s *Service) albumDetailFor(ctx context.Context, providerName, providerID, releaseID string) (*pb.AlbumDetail, error) {
+	id := providerID
+	if releaseID != "" {
+		id = releaseID
+	}
+	return s.providers.GetAlbum(ctx, providerName, id)
 }
 
 // proposeNewAlbum fetches the provider release-group and matches the file to
@@ -317,27 +406,16 @@ func (s *Service) proposeNewAlbum(ctx context.Context, fm *importer.FileMeta) *M
 		return nil
 	}
 	ref := &AlbumRef{Provider: musicbrainzProvider, ProviderID: fm.MBReleaseGroupID, Title: detail.Title, New: true}
-	m := &Match{Album: ref, Confidence: "low", Reason: "album not in library; no track matched"}
-
-	if fm.MBTrackID != "" {
-		for _, pt := range detail.Tracks {
-			if pt.Id == fm.MBTrackID {
-				m.ProviderTrackID, m.TrackTitle = pt.Id, pt.Title
-				m.Confidence, m.Reason = "high", "new album; musicbrainz track id"
-				return m
-			}
+	if rel := taggedEdition(detail, fm); rel != "" {
+		ref.ReleaseID = rel
+		if d, derr := s.albumDetailFor(ctx, musicbrainzProvider, fm.MBReleaseGroupID, rel); derr == nil && d != nil {
+			detail = d
 		}
 	}
-	for _, pt := range detail.Tracks {
-		if strings.EqualFold(pt.Title, fm.Title) {
-			confidence, reason := "medium", "new album; title match"
-			if durationMismatch(int(pt.DurationMs), fm.DurationMs) {
-				confidence, reason = "low", "new album; title match, duration differs"
-			}
-			m.ProviderTrackID, m.TrackTitle = pt.Id, pt.Title
-			m.Confidence, m.Reason = confidence, reason
-			return m
-		}
+	m := &Match{Album: ref, Confidence: "low", Reason: "album not in library; no track matched"}
+	if id, title, conf, reason := matchProviderTrack(detail.Tracks, fm); id != "" {
+		m.ProviderTrackID, m.TrackTitle = id, title
+		m.Confidence, m.Reason = conf, "new album; "+reason
 	}
 	return m
 }
@@ -419,6 +497,55 @@ func (s *Service) SetTrackMatch(fileID, trackID int64) error {
 	b, _ := json.Marshal(m)
 	str := string(b)
 	return s.queries.UpdateUploadFileMatch(fileID, &str, models.UploadStateIdentified)
+}
+
+// SetGroupRelease overrides the release (edition) for every identified file
+// in the batch matched to a provider album the library doesn't have yet —
+// the upload page's edition picker. Each file re-matches against that
+// edition's own tracklist. A nil/empty releaseID returns to the
+// release-group default.
+func (s *Service) SetGroupRelease(ctx context.Context, batchID, providerName, providerID string, releaseID *string) error {
+	if !validBatchID(batchID) {
+		return fmt.Errorf("invalid batch id")
+	}
+	files, err := s.queries.ListUploadFiles(batchID)
+	if err != nil {
+		return err
+	}
+	rid := ""
+	if releaseID != nil {
+		rid = *releaseID
+	}
+	detail, err := s.albumDetailFor(ctx, providerName, providerID, rid)
+	if err != nil || detail == nil {
+		return fmt.Errorf("provider album lookup failed")
+	}
+	for i := range files {
+		f := &files[i]
+		if f.State != models.UploadStateIdentified || f.Match == nil {
+			continue
+		}
+		var m Match
+		if json.Unmarshal([]byte(*f.Match), &m) != nil || m.Album == nil {
+			continue
+		}
+		if !m.Album.New || m.Album.Provider != providerName || m.Album.ProviderID != providerID {
+			continue
+		}
+		m.Album.ReleaseID = rid
+		m.ProviderTrackID, m.TrackTitle = "", ""
+		m.Confidence, m.Reason = "low", "edition selected; no track matched"
+		if fm, terr := importer.ReadTags(f.StagedPath); terr == nil {
+			if id, title, conf, reason := matchProviderTrack(detail.Tracks, fm); id != "" {
+				m.ProviderTrackID, m.TrackTitle = id, title
+				m.Confidence, m.Reason = conf, "edition selected; "+reason
+			}
+		}
+		b, _ := json.Marshal(&m)
+		str := string(b)
+		_ = s.queries.UpdateUploadFileMatch(f.ID, &str, models.UploadStateIdentified)
+	}
+	return nil
 }
 
 // Commit files every identified, non-skipped file into the library. onDuplicate
@@ -557,7 +684,7 @@ func (s *Service) resolveTrack(ctx context.Context, fm *importer.FileMeta, m *Ma
 // ensureAlbum creates the artist (if needed), the provider album, and its full
 // tracklist as wanted — mirroring what watching an album does.
 func (s *Service) ensureAlbum(ctx context.Context, fm *importer.FileMeta, ref *AlbumRef) error {
-	detail, err := s.providers.GetAlbum(ctx, ref.Provider, ref.ProviderID)
+	detail, err := s.albumDetailFor(ctx, ref.Provider, ref.ProviderID, ref.ReleaseID)
 	if err != nil || detail == nil {
 		return fmt.Errorf("provider album lookup failed")
 	}
@@ -593,6 +720,7 @@ func (s *Service) ensureAlbum(ctx context.Context, fm *importer.FileMeta, ref *A
 		Title:      detail.Title,
 		Provider:   ref.Provider,
 		ProviderID: ref.ProviderID,
+		ReleaseID:  optStr(ref.ReleaseID),
 		CoverURL:   optStr(detail.CoverUrl),
 		Status:     models.AlbumStatusWatched,
 	}
@@ -605,14 +733,15 @@ func (s *Service) ensureAlbum(ctx context.Context, fm *importer.FileMeta, ref *A
 	}
 	for _, pt := range detail.Tracks {
 		_ = s.queries.CreateTrack(&models.Track{
-			AlbumID:     album.ID,
-			Title:       pt.Title,
-			TrackNumber: int(pt.TrackNumber),
-			DiscNumber:  int(pt.DiscNumber),
-			DurationMs:  int(pt.DurationMs),
-			Provider:    ref.Provider,
-			ProviderID:  pt.Id,
-			Status:      models.TrackStatusWanted,
+			AlbumID:       album.ID,
+			Title:         pt.Title,
+			TrackNumber:   int(pt.TrackNumber),
+			DiscNumber:    int(pt.DiscNumber),
+			DurationMs:    int(pt.DurationMs),
+			Provider:      ref.Provider,
+			ProviderID:    pt.Id,
+			Status:        models.TrackStatusWanted,
+			MBRecordingID: optStr(pt.Metadata["recording_id"]),
 		})
 	}
 	return nil
@@ -640,4 +769,11 @@ func optStr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

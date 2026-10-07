@@ -196,6 +196,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/", s.handleListUploadBatches)
 			r.Get("/{batch}", s.handleGetUploadBatch)
 			r.Post("/{batch}/identify", s.handleIdentifyUpload)
+			r.Get("/{batch}/editions", s.handleGetUploadEditions)
+			r.Put("/{batch}/release", s.handleSetUploadRelease)
 			r.Patch("/{batch}/files/{file}", s.handlePatchUploadFile)
 			r.Post("/{batch}/commit", s.handleCommitUpload)
 			r.Delete("/{batch}", s.handleDiscardUpload)

@@ -1,9 +1,11 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { formatFileSize, formatDuration } from '../lib/format';
+import { formatFileSize, formatDuration, providerAlbumUrl, providerReleaseUrl } from '../lib/format';
 import { useToast } from '../components/Toast';
-import type { UploadBatch, UploadFileItem } from '../types/index';
+import ProviderBadge from '../components/ProviderBadge';
+import type { AlbumEdition, UploadAlbumRef, UploadBatch, UploadFileItem } from '../types/index';
 
 const ACCEPT = '.mp3,.flac,.wav';
 
@@ -55,7 +57,6 @@ function FileRow({
               <ConfidenceBadge c={m.confidence} />
               <span className="text-xs text-zinc-300 truncate">
                 → {m.track_title || 'unmatched track'}
-                {m.album && ` (${m.album.title}${m.album.new ? ' — new album' : ''})`}
               </span>
               {m.duplicate && (
                 <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-300">
@@ -73,6 +74,87 @@ function FileRow({
         </div>
         {m && <div className="text-[11px] text-zinc-600 mt-0.5">{m.reason}</div>}
       </div>
+    </div>
+  );
+}
+
+// Header for one identified release group: album title, provider link to the
+// identified release, and the edition picker (same control as the album page —
+// library albums refold in place, not-yet-imported albums pin the release the
+// commit will create).
+function ReleaseGroupHeader({
+  batchId,
+  album,
+  onChanged,
+}: {
+  batchId: string;
+  album: UploadAlbumRef;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const isLibrary = !!album.id;
+  const { data: editionsData } = useQuery<{ editions: AlbumEdition[]; current?: string }>({
+    queryKey: isLibrary
+      ? ['album-editions', album.id]
+      : ['upload-editions', batchId, album.provider, album.provider_id],
+    queryFn: () =>
+      isLibrary
+        ? api.getAlbumEditions(album.id!)
+        : api.getUploadEditions(batchId, album.provider, album.provider_id),
+    enabled: album.provider === 'musicbrainz',
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const setRelease = useMutation({
+    mutationFn: (releaseId: string | null) =>
+      isLibrary
+        ? api.setAlbumEdition(album.id!, releaseId).then(() => undefined)
+        : api.setUploadRelease(batchId, album.provider, album.provider_id, releaseId).then(() => undefined),
+    onSuccess: onChanged,
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const editions = editionsData?.editions ?? [];
+  const current = isLibrary ? editionsData?.current : album.release_id;
+  // Link to the specific identified release when one is known, else the
+  // release-group/album page.
+  const link = current
+    ? (providerReleaseUrl(album.provider, current) ?? providerAlbumUrl(album.provider, album.provider_id))
+    : providerAlbumUrl(album.provider, album.provider_id);
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 bg-zinc-800/40 border-b border-zinc-800">
+      <span className="text-sm font-medium text-zinc-200 truncate flex-1 min-w-0">
+        {album.id ? (
+          <Link to={`/album/${album.id}`} className="hover:underline">
+            {album.title}
+          </Link>
+        ) : (
+          album.title
+        )}
+        {album.new && (
+          <span className="ml-2 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-sky-900/60 text-sky-300">
+            new
+          </span>
+        )}
+      </span>
+      <ProviderBadge provider={album.provider} href={link} />
+      {editions.length > 0 && (
+        <select
+          value={current ?? ''}
+          disabled={setRelease.isPending}
+          onChange={(e) => setRelease.mutate(e.target.value || null)}
+          className="h-7 min-w-0 max-w-56 text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 disabled:opacity-50"
+          title="Release edition — files re-match against this release's tracklist"
+        >
+          <option value="">Auto (default release)</option>
+          {editions.map((e) => (
+            <option key={e.id} value={e.id}>
+              {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
+              {e.track_count ? ` (${e.track_count} tracks)` : ''}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
@@ -150,6 +232,27 @@ export default function Upload() {
     },
     [upload, toast],
   );
+
+  // Group files by identified release — existing library albums group on the
+  // album id, new provider albums on provider+release-group, everything else
+  // falls into the unmatched group.
+  const groups = useMemo(() => {
+    if (!batch) return [];
+    const map = new Map<string, { key: string; album?: UploadAlbumRef; files: UploadFileItem[] }>();
+    const order: string[] = [];
+    for (const f of batch.files) {
+      const a = f.match?.album;
+      const key = a ? (a.id ? `lib:${a.id}` : `new:${a.provider}:${a.provider_id}`) : 'none';
+      let g = map.get(key);
+      if (!g) {
+        g = { key, album: a, files: [] };
+        map.set(key, g);
+        order.push(key);
+      }
+      g.files.push(f);
+    }
+    return order.map((k) => map.get(k)!);
+  }, [batch]);
 
   // New-album proposals carry provider_track_id (not track_id — the row is
   // created at commit), so a file is committable if either is present.
@@ -235,13 +338,32 @@ export default function Upload() {
             </button>
           </div>
 
-          <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
-            {batch.files.map((f) => (
-              <FileRow
-                key={f.id}
-                file={f}
-                onToggleSkip={(id, skip) => patchFile.mutate({ fileId: id, skip })}
-              />
+          <div className="space-y-3">
+            {groups.map((g) => (
+              <div key={g.key} className="rounded-lg border border-zinc-800 overflow-hidden">
+                {g.album ? (
+                  <ReleaseGroupHeader
+                    batchId={batch.batch_id}
+                    album={g.album}
+                    onChanged={() =>
+                      queryClient.invalidateQueries({ queryKey: ['upload-batch', batchId] })
+                    }
+                  />
+                ) : (
+                  <div className="px-4 py-2 bg-zinc-800/40 border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
+                    No album match
+                  </div>
+                )}
+                <div className="divide-y divide-zinc-800">
+                  {g.files.map((f) => (
+                    <FileRow
+                      key={f.id}
+                      file={f}
+                      onToggleSkip={(id, skip) => patchFile.mutate({ fileId: id, skip })}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 

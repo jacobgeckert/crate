@@ -286,6 +286,7 @@ export interface UploadAlbumRef {
   provider: string;
   provider_id: string;
   title: string;
+  release_id?: string;
   new: boolean;
 }
 

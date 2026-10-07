@@ -28,6 +28,7 @@ type FileMeta struct {
 	// the file isn't MB-tagged.
 	MBArtistID       string // album artist MBID
 	MBReleaseGroupID string // matches Crate's MusicBrainz album namespace
+	MBReleaseID      string // release MBID — the specific edition/pressing
 	MBTrackID        string // release-track MBID, matches album browse tracks
 	MBRecordingID    string // recording MBID (AcoustID fingerprint / Music Assistant), release-independent
 }
@@ -73,6 +74,8 @@ func readMP3(path string) (*FileMeta, error) {
 			m.MBArtistID = strings.TrimSpace(udf.Value)
 		case "musicbrainz release group id":
 			m.MBReleaseGroupID = strings.TrimSpace(udf.Value)
+		case "musicbrainz album id":
+			m.MBReleaseID = strings.TrimSpace(udf.Value)
 		case "musicbrainz release track id":
 			m.MBTrackID = strings.TrimSpace(udf.Value)
 		}
@@ -140,6 +143,8 @@ func readFLAC(path string) (*FileMeta, error) {
 				m.MBArtistID = val
 			case "MUSICBRAINZ_RELEASEGROUPID":
 				m.MBReleaseGroupID = val
+			case "MUSICBRAINZ_ALBUMID":
+				m.MBReleaseID = val
 			case "MUSICBRAINZ_RELEASETRACKID":
 				m.MBTrackID = val
 			case "MUSICBRAINZ_TRACKID":
