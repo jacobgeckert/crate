@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -34,12 +35,12 @@ type SearchRequest struct {
 }
 
 type SearchResponse struct {
-	ID          string           `json:"id"`
-	SearchText  string           `json:"searchText"`
-	State       string           `json:"state"`
-	IsComplete  bool             `json:"isComplete"`
-	FileCount   int              `json:"fileCount"`
-	Responses   []SearchResult   `json:"responses"`
+	ID         string         `json:"id"`
+	SearchText string         `json:"searchText"`
+	State      string         `json:"state"`
+	IsComplete bool           `json:"isComplete"`
+	FileCount  int            `json:"fileCount"`
+	Responses  []SearchResult `json:"responses"`
 }
 
 type SearchResult struct {
@@ -140,23 +141,38 @@ func (c *Client) CancelDownload(ctx context.Context, username, id string) error 
 }
 
 func (c *Client) GetDownload(ctx context.Context, username, id string) (*Transfer, error) {
-	var dirs []UserDownloads
-	if err := c.do(ctx, "GET", "/api/v0/transfers/downloads", nil, &dirs); err != nil {
+	return c.findDownload(ctx, username, func(f Transfer) bool { return f.ID == id },
+		fmt.Sprintf("transfer %s not found", id))
+}
+
+// GetDownloadByFilename locates a transfer by its remote filename — the
+// rescue path for when the id captured at enqueue no longer resolves
+// (slskd restart, record prune-and-recreate).
+func (c *Client) GetDownloadByFilename(ctx context.Context, username, filename string) (*Transfer, error) {
+	return c.findDownload(ctx, username, func(f Transfer) bool { return f.Filename == filename },
+		fmt.Sprintf("transfer for %s not found", filename))
+}
+
+func (c *Client) findDownload(ctx context.Context, username string, match func(Transfer) bool, notFound string) (*Transfer, error) {
+	dirs, err := c.GetAllDownloads(ctx)
+	if err != nil {
 		return nil, err
 	}
 	for _, ud := range dirs {
-		if ud.Username != username {
+		// Soulseek usernames are case-insensitive; slskd's casing can differ
+		// from what the search response reported.
+		if !strings.EqualFold(ud.Username, username) {
 			continue
 		}
 		for _, dir := range ud.Directories {
 			for _, f := range dir.Files {
-				if f.ID == id {
+				if match(f) {
 					return &f, nil
 				}
 			}
 		}
 	}
-	return nil, fmt.Errorf("transfer %s not found", id)
+	return nil, fmt.Errorf("%s", notFound)
 }
 
 // HTTP helpers

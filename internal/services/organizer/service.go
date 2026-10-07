@@ -136,6 +136,33 @@ func (s *Service) Organize(track *models.Track) error {
 	return s.queries.UpdateTrackFilePath(track.ID, relPath)
 }
 
+// DownloadedFileExists reports whether a file matching the remote path's
+// basename already exists under the downloads dir. The downloader uses it to
+// rescue transfers that vanished from slskd's list after the bytes landed.
+// Files inside an "incomplete" directory (slskd's partial-file location, if
+// it happens to be under the same mounted root) don't count.
+func (s *Service) DownloadedFileExists(remoteName string) bool {
+	base := remoteName
+	if idx := strings.LastIndexAny(base, `/\`); idx >= 0 {
+		base = base[idx+1:]
+	}
+	p, err := findFile(s.downloadsDir, base)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(s.downloadsDir, p)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	for _, part := range parts[:len(parts)-1] {
+		if strings.EqualFold(part, "incomplete") {
+			return false
+		}
+	}
+	return true
+}
+
 // storedFilePath returns the track's current file path from the DB resolved
 // to an absolute path, or "" if the track has none (first download).
 func (s *Service) storedFilePath(trackID int64) string {

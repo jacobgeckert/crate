@@ -36,6 +36,10 @@ var losslessExts = map[string]bool{
 
 type Organizer interface {
 	Organize(track *models.Track) error
+	// DownloadedFileExists reports whether a remote path's basename already
+	// exists under the downloads dir — the rescue check for transfers that
+	// vanish from slskd's list after the bytes landed.
+	DownloadedFileExists(remoteName string) bool
 }
 
 type PostDownloadNotifier interface {
@@ -97,7 +101,9 @@ func (s *Service) GetProgress(ctx context.Context) ([]ProgressItem, error) {
 	downloading, _ := s.queries.ListDownloads("downloading")
 	for _, d := range downloading {
 		if d.SlskdSearchID != nil {
-			activeTransfers[*d.SlskdSearchID] = true
+			// Lowercased: Soulseek usernames are case-insensitive and slskd's
+			// transfers list can report different casing than the search did.
+			activeTransfers[strings.ToLower(*d.SlskdSearchID)] = true
 		}
 	}
 
@@ -108,7 +114,7 @@ func (s *Service) GetProgress(ctx context.Context) ([]ProgressItem, error) {
 				if strings.Contains(f.State, "Completed") {
 					continue
 				}
-				transferKey := ud.Username + "|" + f.ID
+				transferKey := strings.ToLower(ud.Username + "|" + f.ID)
 				if !activeTransfers[transferKey] {
 					continue
 				}
@@ -505,39 +511,27 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 
 	transfer, err := s.slskd.GetDownload(ctx, username, transferID)
 	if err != nil {
-		// Transfer may have been cleaned up; mark failed so it retries
-		errStr := err.Error()
-		_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
-		return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errStr)
+		pollErr := err
+		// The transfer vanished from slskd's list — either its record was
+		// pruned/recreated (id or username casing drift), or it completed and
+		// was cleaned up between ticks. Re-locate by filename first; if the
+		// file already landed on disk, organize it instead of failing.
+		if t := s.findTransferByFilename(ctx, d, username); t != nil {
+			transfer = t
+			key := username + "|" + t.ID
+			_ = s.queries.UpdateDownloadStatus(d.ID, d.Status, &key, nil)
+		} else if s.organizeIfOnDisk(ctx, d, username) {
+			return nil
+		} else {
+			_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
+			return s.failWithRetry(d, pollErr.Error())
+		}
 	}
 
 	state := transfer.State
 	switch {
 	case strings.Contains(state, "Succeeded"):
-		rawName := transfer.Filename
-		if idx := strings.LastIndexAny(rawName, `/\`); idx >= 0 {
-			rawName = rawName[idx+1:]
-		}
-		if err := s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusOrganizing, d.SlskdSearchID, nil); err != nil {
-			return err
-		}
-		slog.Info("downloader: organizing", "filename", rawName, "track_id", d.TrackID)
-		track, err := s.queries.GetTrackWithMeta(d.TrackID)
-		if err != nil {
-			return err
-		}
-		track.FilePath = &rawName
-
-		if err := s.organizer.Organize(track); err != nil {
-			slog.Error("downloader: organize failed, will retry", "filename", rawName, "track_id", d.TrackID, "error", err)
-			return err
-		}
-		s.logActivity("download_complete", "track", d.TrackID,
-			fmt.Sprintf("Downloaded: %s - %s from %s", track.ArtistName, track.Title, username))
-		for _, n := range s.notifiers {
-			n.TriggerScan(ctx)
-		}
-		return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusComplete, d.SlskdSearchID, nil)
+		return s.completeDownload(ctx, d, username, transfer.Filename)
 
 	case strings.Contains(state, "Errored"), strings.Contains(state, "Rejected"), strings.Contains(state, "Cancelled"):
 		_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
@@ -574,6 +568,71 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 		}
 	}
 	return nil
+}
+
+// completeDownload moves a finished transfer's file into the library and
+// flips the queue row + track to their owned states.
+func (s *Service) completeDownload(ctx context.Context, d models.DownloadQueueItem, username, remoteName string) error {
+	rawName := remoteName
+	if idx := strings.LastIndexAny(rawName, `/\`); idx >= 0 {
+		rawName = rawName[idx+1:]
+	}
+	if err := s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusOrganizing, d.SlskdSearchID, nil); err != nil {
+		return err
+	}
+	slog.Info("downloader: organizing", "filename", rawName, "track_id", d.TrackID)
+	track, err := s.queries.GetTrackWithMeta(d.TrackID)
+	if err != nil {
+		return err
+	}
+	track.FilePath = &rawName
+
+	if err := s.organizer.Organize(track); err != nil {
+		slog.Error("downloader: organize failed, will retry", "filename", rawName, "track_id", d.TrackID, "error", err)
+		return err
+	}
+	s.logActivity("download_complete", "track", d.TrackID,
+		fmt.Sprintf("Downloaded: %s - %s from %s", track.ArtistName, track.Title, username))
+	for _, n := range s.notifiers {
+		n.TriggerScan(ctx)
+	}
+	return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusComplete, d.SlskdSearchID, nil)
+}
+
+// findTransferByFilename re-locates a transfer that vanished by id — slskd
+// can drop and recreate transfer records (restart, prune), and the stored
+// username casing may differ from what the transfers list reports.
+func (s *Service) findTransferByFilename(ctx context.Context, d models.DownloadQueueItem, username string) *slskd.Transfer {
+	track, err := s.queries.GetTrackWithMeta(d.TrackID)
+	if err != nil || track.DownloadedFilename == nil {
+		return nil
+	}
+	tr, err := s.slskd.GetDownloadByFilename(ctx, username, *track.DownloadedFilename)
+	if err != nil {
+		return nil
+	}
+	return tr
+}
+
+// organizeIfOnDisk finishes a download whose transfer vanished from slskd but
+// whose file already landed in the downloads dir — fast transfers can
+// complete and be pruned between ticks. Returns false when the file isn't
+// there, so the caller can fall back to a real retry.
+func (s *Service) organizeIfOnDisk(ctx context.Context, d models.DownloadQueueItem, username string) bool {
+	track, err := s.queries.GetTrackWithMeta(d.TrackID)
+	if err != nil || track.DownloadedFilename == nil {
+		return false
+	}
+	if !s.organizer.DownloadedFileExists(*track.DownloadedFilename) {
+		return false
+	}
+	slog.Info("downloader: transfer gone but file on disk, organizing",
+		"track_id", d.TrackID, "filename", *track.DownloadedFilename)
+	// On error the row sits in "organizing" — retryOrganize owns it now.
+	if err := s.completeDownload(ctx, d, username, *track.DownloadedFilename); err != nil {
+		slog.Error("downloader: on-disk organize failed", "track_id", d.TrackID, "error", err)
+	}
+	return true
 }
 
 // retryOrganize is called for downloads stuck in "organizing" (e.g. after a crash).
