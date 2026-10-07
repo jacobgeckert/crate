@@ -96,8 +96,7 @@ func (s *Service) Organize(track *models.Track) error {
 
 	slog.Info("organizer: moved", "dest", dest)
 	s.removeReplacedFile(oldAbs, dest)
-	// Drop now-empty dirs the file's remote folder left under downloads.
-	pruneEmptyDirs(filepath.Dir(src), s.downloadsDir)
+	s.cleanDownloadedDir(filepath.Dir(src))
 
 	coverURL := ""
 	if album.CoverURL != nil {
@@ -163,6 +162,44 @@ func (s *Service) DownloadedFileExists(remoteName string) bool {
 		}
 	}
 	return true
+}
+
+var audioExts = map[string]bool{
+	".flac": true, ".mp3": true, ".ogg": true, ".opus": true,
+	".aac": true, ".m4a": true, ".wav": true,
+}
+
+// cleanDownloadedDir removes the slskd download folder a moved file came
+// from once nothing audio remains in it — slskd recreates the remote dir
+// structure, so leftover non-audio junk (cue/log/art) would keep the folder
+// alive forever otherwise. Audio files are never deleted: they may belong to
+// a track still in flight or awaiting the downloader's on-disk rescue.
+// Contained to s.downloadsDir.
+func (s *Service) cleanDownloadedDir(dir string) {
+	dir = filepath.Clean(dir)
+	if dir == filepath.Clean(s.downloadsDir) || !library.Contains(s.downloadsDir, dir) {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		p := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			s.cleanDownloadedDir(p)
+		} else if !audioExts[strings.ToLower(filepath.Ext(e.Name()))] {
+			if err := os.Remove(p); err == nil {
+				slog.Info("organizer: removed download leftover", "path", p)
+			}
+		}
+	}
+	// os.Remove only succeeds once the dir is empty — audio leftovers or a
+	// racing transfer landing mid-clean keep it alive.
+	if err := os.Remove(dir); err == nil {
+		slog.Info("organizer: removed emptied download dir", "path", dir)
+		pruneEmptyDirs(filepath.Dir(dir), s.downloadsDir)
+	}
 }
 
 // storedFilePath returns the track's current file path from the DB resolved
