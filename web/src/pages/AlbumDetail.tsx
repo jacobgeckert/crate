@@ -160,7 +160,8 @@ export default function AlbumDetail() {
       queryClient.invalidateQueries({ queryKey: ['album'] });
       queryClient.invalidateQueries({ queryKey: ['artist'] });
       toast(
-        `Tracks split into a separate album — ${res.moved} moved, ${res.relocated} file(s) relocated, ${res.added} added`,
+        `Tracks split into a separate album — ${res.moved} moved, ${res.relocated} file(s) relocated` +
+          (res.restored ? `, ${res.restored} restored on source` : ''),
         'success',
       );
       navigate(`/album/${res.album_id}`);

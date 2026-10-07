@@ -980,18 +980,29 @@ func TestSplitTracks(t *testing.T) {
 	env.queries.CreateTrack(&inst2)
 	env.queries.UpdateTrackFilePath(inst2.ID, "Album Two/02-inst.flac")
 
-	body := fmt.Sprintf(`{"release_id": "rel-2001-inst", "track_ids": [%d, %d]}`, inst1.ID, inst2.ID)
+	// Also split the standard Track B1 row — the source album's tracklist
+	// should restore it afterwards rather than leave a hole.
+	stdTracks, _ := env.queries.ListTracksByAlbum(two.ID)
+	var stdID int64
+	for _, tr := range stdTracks {
+		if tr.Title == "Track B1" {
+			stdID = tr.ID
+		}
+	}
+
+	body := fmt.Sprintf(`{"release_id": "rel-2001-inst", "track_ids": [%d, %d, %d]}`, inst1.ID, inst2.ID, stdID)
 	w := env.do("POST", fmt.Sprintf("/api/albums/%d/split-tracks", two.ID), body)
 	if w.Code != 200 {
 		t.Fatalf("split tracks: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	res := decode[struct {
-		AlbumID int64 `json:"album_id"`
-		Moved   int   `json:"moved"`
-		Added   int   `json:"added"`
+		AlbumID  int64 `json:"album_id"`
+		Moved    int   `json:"moved"`
+		Added    int   `json:"added"`
+		Restored int   `json:"restored"`
 	}](t, w)
-	if res.Moved != 2 || res.Added != 0 {
-		t.Errorf("split result = %+v, want moved=2 added=0", res)
+	if res.Moved != 3 || res.Added != 0 || res.Restored != 1 {
+		t.Errorf("split result = %+v, want moved=3 added=0 restored=1", res)
 	}
 
 	// New album is keyed by the release id, keeps the edition title + files.
@@ -1006,19 +1017,31 @@ func TestSplitTracks(t *testing.T) {
 		t.Errorf("split title = %q, want 'Album Two (instrumental)'", split.Title)
 	}
 	splitTracks, _ := env.queries.ListTracksByAlbum(split.ID)
-	if len(splitTracks) != 2 {
-		t.Fatalf("split album tracks = %d, want 2", len(splitTracks))
+	if len(splitTracks) != 3 {
+		t.Fatalf("split album tracks = %d, want 3", len(splitTracks))
 	}
 	for _, tr := range splitTracks {
+		if tr.Title == "Track B1" {
+			// The moved standard row matched nothing on the instrumental
+			// release — rekeyed local so the source could restore its own.
+			if tr.Provider != "local" {
+				t.Errorf("moved Track B1 provider = %s, want local (no release-track match)", tr.Provider)
+			}
+			continue
+		}
 		if tr.Status != models.TrackStatusOwned || tr.FilePath == nil {
 			t.Errorf("moved track %s lost owned/file state", tr.Title)
 		}
 	}
 
-	// Source album keeps only the standard-edition rows.
+	// Source album restored its own tracklist — the vacated standard row is
+	// recreated rather than lost.
 	srcTracks, _ := env.queries.ListTracksByAlbum(two.ID)
 	if len(srcTracks) != 1 || srcTracks[0].Title != "Track B1" {
 		t.Fatalf("source album tracks = %+v, want just Track B1", srcTracks)
+	}
+	if srcTracks[0].Status != models.TrackStatusIgnored {
+		t.Errorf("restored Track B1 status = %s, want ignored (album is ignored)", srcTracks[0].Status)
 	}
 
 	// Splitting into the album itself is rejected.

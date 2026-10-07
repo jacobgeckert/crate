@@ -312,7 +312,8 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 		if !want[t.ID] {
 			continue
 		}
-		if pt := matchProviderTrack(t, detail.Tracks); pt != nil {
+		pt := matchProviderTrack(t, detail.Tracks)
+		if pt != nil {
 			if t.Provider != album.Provider || t.ProviderID != pt.Id {
 				if err := s.queries.RelinkTrack(t.ID, album.Provider, pt.Id); err != nil {
 					slog.Error("split: relink track failed", "album", target.Title, "track", t.Title, "error", err)
@@ -331,6 +332,17 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 			t.DiscNumber = int(pt.DiscNumber)
 			t.Provider = album.Provider
 			t.ProviderID = pt.Id
+		} else if t.Provider != provider.LocalProvider {
+			// No entry on the target release — keeping the old release-track
+			// id would block the source from restoring its own tracklist
+			// (provider+id is globally unique). Rekey as a local row; the UI's
+			// link affordance can anchor it later.
+			if err := s.queries.RelinkTrack(t.ID, provider.LocalProvider, fmt.Sprintf("loc-split-%d", t.ID)); err != nil {
+				slog.Error("split: local rekey failed", "album", target.Title, "track", t.Title, "error", err)
+			} else {
+				t.Provider = provider.LocalProvider
+				t.ProviderID = fmt.Sprintf("loc-split-%d", t.ID)
+			}
 		}
 		if err := s.queries.UpdateTrackAlbum(t.ID, target.ID); err != nil {
 			slog.Error("split: move track failed", "album", target.Title, "track", t.Title, "error", err)
@@ -358,16 +370,31 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 	added, _, _, _ := s.foldAlbumTracks(album.Provider, target.ID, target.Title, trackStatus, detail, false)
 	s.enrichAlbumCover(ctx, target.ID)
 
+	// Re-fold the source album's own tracklist so positions vacated by moved
+	// rows are recreated — the source edition keeps its full listing.
+	restored := 0
+	if srcDetail, err := s.providers.GetAlbum(ctx, album.Provider, album.TracklistID()); err == nil && srcDetail != nil {
+		srcStatus := models.TrackStatusWanted
+		if album.Status == models.AlbumStatusIgnored {
+			srcStatus = models.TrackStatusIgnored
+		}
+		restored, _, _, _ = s.foldAlbumTracks(album.Provider, album.ID, album.Title, srcStatus, srcDetail, false)
+	} else if err != nil {
+		slog.Warn("split: source tracklist refresh failed", "album", album.Title, "error", err)
+	}
+
 	slog.Info("split: moved tracks to release album", "album", album.Title, "release_id", req.ReleaseID,
-		"target", target.ID, "moved", moved, "relocated", relocated, "added", added)
+		"target", target.ID, "moved", moved, "relocated", relocated, "added", added, "restored", restored)
 	s.activityLog.Record("album_split", "album", target.ID, fmt.Sprintf(
-		"Split %d track(s) from %s into %s — %d file(s) relocated, %d added", moved, album.Title, target.Title, relocated, added))
+		"Split %d track(s) from %s into %s — %d file(s) relocated, %d added, %d restored",
+		moved, album.Title, target.Title, relocated, added, restored))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"album_id":  target.ID,
 		"moved":     moved,
 		"relocated": relocated,
 		"added":     added,
+		"restored":  restored,
 	})
 }
 
