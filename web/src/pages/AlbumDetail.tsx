@@ -90,6 +90,15 @@ export default function AlbumDetail() {
     },
   });
 
+  const refreshAlbum = useMutation({
+    mutationFn: () => api.refreshAlbum(Number(id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
+      queryClient.invalidateQueries({ queryKey: ['album-editions', id] });
+    },
+  });
+
   const ignoreAlbum = useMutation({
     mutationFn: () => api.ignoreAlbum(Number(id)),
     onSuccess: () => {
@@ -310,7 +319,7 @@ export default function AlbumDetail() {
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-14 h-14 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+        <div className="self-stretch aspect-square rounded-lg bg-zinc-800 overflow-hidden shrink-0">
           {album.cover_url ? (
             <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
           ) : (
@@ -350,6 +359,18 @@ export default function AlbumDetail() {
             )}
           </div>
         </div>
+        {album.provider !== 'local' && (
+          <button
+            onClick={() => refreshAlbum.mutate()}
+            disabled={refreshAlbum.isPending}
+            className="p-1.5 rounded-lg transition-colors shrink-0 text-zinc-500 bg-zinc-800 active:bg-zinc-700 disabled:opacity-50"
+            title="Refresh tracklist & cover from provider"
+          >
+            <svg className={`w-4 h-4 ${refreshAlbum.isPending ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6" /><path d="M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+            </svg>
+          </button>
+        )}
         <button
           onClick={() => { if (album.status === 'ignored') { unignoreAlbum.mutate(); } else { ignoreAlbum.mutate(); } }}
           disabled={ignoreAlbum.isPending || unignoreAlbum.isPending}

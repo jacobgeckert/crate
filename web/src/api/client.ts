@@ -94,6 +94,8 @@ export const api = {
   unwatchTrack: (id: number) =>
     request<void>(`/tracks/${id}`, { method: 'DELETE' }),
 
+  refreshAlbum: (id: number) =>
+    request<{ ok: boolean }>(`/albums/${id}/refresh`, { method: 'POST' }),
   getAlbumEditions: (id: number) =>
     request<{ editions: AlbumEdition[]; current?: string }>(`/albums/${id}/editions`),
   setAlbumEdition: (id: number, releaseId: string | null) =>

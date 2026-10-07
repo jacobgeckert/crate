@@ -86,6 +86,39 @@ func (s *Server) handleGetAlbumEditions(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleRefreshAlbum re-pulls one album's tracklist from its provider —
+// honoring a pinned edition — re-folds tracks (recording-id merge included),
+// and re-resolves cover art. The single-album counterpart of artist refresh.
+func (s *Server) handleRefreshAlbum(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	album, err := s.queries.GetAlbum(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "album not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get album")
+		return
+	}
+	if album.Provider == "" || album.Provider == provider.LocalProvider {
+		writeError(w, http.StatusBadRequest, "album is not linked to a provider")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	s.reconcileAlbumTracks(ctx, album.Provider, album.ID, album.ProviderID)
+	s.enrichAlbumCover(ctx, album.ID)
+	s.activityLog.Record("album_refresh", "album", album.ID,
+		fmt.Sprintf("Refreshed %s from %s", album.Title, album.Provider))
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // handleSetAlbumEdition pins an album to a specific provider release (or back
 // to the release-group default with null), then folds the album's tracks onto
 // that edition's tracklist. Owned tracks re-anchor by recording id where
