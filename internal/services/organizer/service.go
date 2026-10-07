@@ -202,6 +202,17 @@ func (s *Service) cleanDownloadedDir(dir string) {
 	}
 }
 
+// LibraryFileExists reports whether the track's stored file_path resolves to
+// an existing file — tells a stuck organizing row apart from "the move
+// already happened" so it can be closed out instead of retried.
+func (s *Service) LibraryFileExists(track *models.Track) bool {
+	if track.FilePath == nil || *track.FilePath == "" {
+		return false
+	}
+	_, err := os.Stat(library.ResolvePath(s.libraryDir, *track.FilePath))
+	return err == nil
+}
+
 // storedFilePath returns the track's current file path from the DB resolved
 // to an absolute path, or "" if the track has none (first download).
 func (s *Service) storedFilePath(trackID int64) string {

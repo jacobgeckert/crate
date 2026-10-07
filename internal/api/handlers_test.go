@@ -87,8 +87,9 @@ func newTestEnv(t *testing.T) *testEnv {
 
 type noopOrganizer struct{}
 
-func (o *noopOrganizer) Organize(track *models.Track) error { return nil }
-func (o *noopOrganizer) DownloadedFileExists(string) bool   { return false }
+func (o *noopOrganizer) Organize(track *models.Track) error   { return nil }
+func (o *noopOrganizer) DownloadedFileExists(string) bool     { return false }
+func (o *noopOrganizer) LibraryFileExists(*models.Track) bool { return false }
 
 func (e *testEnv) do(method, path string, body string) *httptest.ResponseRecorder {
 	var reader *strings.Reader
