@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { formatTotalDuration, providerArtistUrl, PROVIDER_LABEL } from '../lib/format';
+import { formatTotalDuration, providerArtistUrl } from '../lib/format';
 import FilterBar from '../components/FilterBar';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
@@ -319,26 +319,13 @@ export default function ArtistDetail() {
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-bold truncate">{artist.name}</h2>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <ProviderBadge provider={artist.provider} />
+            <ProviderBadge provider={artist.provider} href={providerArtistUrl(artist.provider, artist.provider_id) ?? undefined} />
             <span className="text-[10px] text-zinc-600">
               {artist.status === 'watched' ? 'Full discography' : artist.status === 'partial' ? 'Partial' : 'Owned'}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {providerArtistUrl(artist.provider, artist.provider_id) && (
-            <a
-              href={providerArtistUrl(artist.provider, artist.provider_id)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors"
-              title={`View on ${PROVIDER_LABEL[artist.provider] ?? artist.provider}`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
-            </a>
-          )}
           {artist.provider !== 'local' && (
             <button
               onClick={() => refresh.mutate()}
