@@ -9,12 +9,23 @@ import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
 import type { Track, Album, ProviderInfo } from '../types/index';
 
-const ALBUM_TYPE_ORDER = ['album', 'ep', 'single', 'compilation'];
+const ALBUM_TYPE_ORDER = ['album', 'ep', 'single', 'compilation', 'live', 'remix', 'soundtrack', 'dj-mix', 'mixtape', 'demo'];
 const ALBUM_TYPE_LABELS: Record<string, string> = {
   album: 'Albums',
   ep: 'EPs',
   single: 'Singles',
   compilation: 'Compilations',
+  live: 'Live',
+  remix: 'Remixes',
+  soundtrack: 'Soundtracks',
+  'dj-mix': 'DJ Mixes',
+  mixtape: 'Mixtapes',
+  demo: 'Demos',
+  spokenword: 'Spoken Word',
+  interview: 'Interviews',
+  audiobook: 'Audiobooks',
+  'field-recording': 'Field Recordings',
+  'audio-drama': 'Audio Dramas',
 };
 
 export default function ArtistDetail() {
@@ -646,6 +657,11 @@ function AlbumStatusSummary({ album, artistProvider }: { album: Album; artistPro
   // a leftover the reconcile couldn't match — flag it so the user can link it.
   if (album.provider === 'local' && artistProvider !== 'local') {
     return <span className="text-[10px] font-medium text-amber-400 shrink-0">unmatched</span>;
+  }
+  // Album-level ignore — owned tracks keep their status under an ignored
+  // album, so the flag can't be inferred from track statuses alone.
+  if (album.status === 'ignored') {
+    return <span className="text-[10px] font-medium text-zinc-500 shrink-0">ignored</span>;
   }
   const tracks = album.tracks;
   if (!tracks?.length) return null;

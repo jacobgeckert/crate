@@ -74,8 +74,25 @@ export function providerReleaseUrl(provider: string, id: string): string | undef
   return PROVIDER_RELEASE_URL[provider]?.(id);
 }
 
+const RECORD_TYPE_LABELS: Record<string, string> = {
+  album: 'Album',
+  ep: 'EP',
+  single: 'Single',
+  compilation: 'Compilation',
+  live: 'Live',
+  remix: 'Remix',
+  soundtrack: 'Soundtrack',
+  'dj-mix': 'DJ Mix',
+  mixtape: 'Mixtape',
+  demo: 'Demo',
+  spokenword: 'Spoken Word',
+  interview: 'Interview',
+  audiobook: 'Audiobook',
+  'field-recording': 'Field Recording',
+  'audio-drama': 'Audio Drama',
+};
+
 export function recordTypeLabel(recordType: string): string {
   const t = recordType || 'album';
-  if (t === 'ep') return 'EP';
-  return t.charAt(0).toUpperCase() + t.slice(1);
+  return RECORD_TYPE_LABELS[t] ?? t.charAt(0).toUpperCase() + t.slice(1);
 }

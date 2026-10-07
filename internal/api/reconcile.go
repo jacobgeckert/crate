@@ -82,6 +82,9 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 			if d := pa.Metadata["release_date"]; d != "" {
 				s.queries.BackfillAlbumReleaseDate(a.ID, d)
 			}
+			if pa.RecordType != "" && a.RecordType != pa.RecordType {
+				s.queries.SetAlbumRecordType(a.ID, pa.RecordType)
+			}
 			// Already ours on this provider — fill any tracks it's newly listing.
 			s.reconcileAlbumTracks(ctx, providerName, a.ID, pa.Id)
 			s.enrichAlbumCover(ctx, a.ID)
@@ -563,9 +566,13 @@ func (s *Server) newReleaseWatchFor(artist *models.Artist) *newReleaseWatch {
 
 // qualifies mirrors the scheduler's gate: watched type, released on/after the
 // watch start. A missing release date doesn't disqualify (can't prove it's
-// old), matching detectNewReleases.
+// old), matching detectNewReleases. Secondary-type releases ("Album + Live",
+// "Album + Compilation") never qualify — they land ignored by default.
 func (w *newReleaseWatch) qualifies(pa *pb.AlbumSummary) bool {
 	if !w.watching {
+		return false
+	}
+	if pa.Metadata["secondary_types"] != "" {
 		return false
 	}
 	if t := pa.RecordType; t != "" && !w.types[t] {

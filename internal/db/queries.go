@@ -362,6 +362,14 @@ func (q *Queries) ListAlbumsByArtist(artistID int64) ([]models.Album, error) {
 	return albums, rows.Err()
 }
 
+// SetAlbumRecordType refreshes an album's record_type when the provider now
+// reports a different classification — e.g. a release-group that gained a
+// secondary type since the album was first saved.
+func (q *Queries) SetAlbumRecordType(id int64, recordType string) error {
+	_, err := q.db.Exec(`UPDATE albums SET record_type = ?, updated_at = ? WHERE id = ?`, recordType, now(), id)
+	return err
+}
+
 func (q *Queries) UpdateAlbumStatus(id int64, status models.AlbumStatus) error {
 	_, err := q.db.Exec(`UPDATE albums SET status = ?, updated_at = ? WHERE id = ?`, status, now(), id)
 	return err

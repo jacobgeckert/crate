@@ -106,7 +106,12 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 		}
 		added := 0
 		for _, pa := range albumList.Albums {
-			if t := pa.RecordType; t != "" && !watchTypes[t] {
+			// Secondary-type releases ("Album + Live", "Album + Compilation")
+			// are collected for completeness but always land ignored; releases
+			// of an unwatched primary type are skipped entirely.
+			secondary := pa.Metadata["secondary_types"] != ""
+			watchedType := pa.RecordType == "" || watchTypes[pa.RecordType]
+			if !watchedType && !secondary {
 				continue
 			}
 			if existing, _ := s.queries.FindAlbumByProvider(artist.Provider, pa.Id); existing != nil {
@@ -124,6 +129,12 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 			if year > 0 {
 				yearPtr = &year
 			}
+			albumStatus := models.AlbumStatusWatched
+			trackStatus := models.TrackStatusWanted
+			if !watchedType || secondary {
+				albumStatus = models.AlbumStatusIgnored
+				trackStatus = models.TrackStatusIgnored
+			}
 			cover := pa.CoverUrl
 			album := models.Album{
 				ArtistID:    artist.ID,
@@ -134,7 +145,7 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 				CoverURL:    strPtrOrNil(cover),
 				RecordType:  pa.RecordType,
 				ReleaseDate: strPtrOrNil(releaseDate),
-				Status:      models.AlbumStatusWatched,
+				Status:      albumStatus,
 			}
 			if err := s.queries.CreateAlbum(&album); err != nil {
 				continue
@@ -153,7 +164,7 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 					Provider:      artist.Provider,
 					ProviderID:    pt.Id,
 					MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
-					Status:        models.TrackStatusWanted,
+					Status:        trackStatus,
 				})
 			}
 			added++

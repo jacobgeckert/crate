@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -326,6 +324,11 @@ func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, alb
 		if existingAlbum, _ := s.queries.FindAlbumByProvider(providerName, pa.Id); existingAlbum != nil {
 			if d := pa.Metadata["release_date"]; d != "" {
 				s.queries.BackfillAlbumReleaseDate(existingAlbum.ID, d)
+			}
+			// A release reclassified upstream (e.g. gained a secondary type)
+			// re-sorts under its new section on the next sync.
+			if pa.RecordType != "" && existingAlbum.RecordType != pa.RecordType {
+				s.queries.SetAlbumRecordType(existingAlbum.ID, pa.RecordType)
 			}
 			s.syncAlbumTracks(ctx, providerName, existingAlbum)
 			s.enrichAlbumCover(ctx, existingAlbum.ID)
@@ -683,67 +686,6 @@ func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, album)
-}
-
-// handleAlbumFiles lists the on-disk contents of an album's folder — the
-// parent directory holding most of its files (covers disc subfolders), so
-// stray files elsewhere never drag the listing above the album dir.
-func (s *Server) handleAlbumFiles(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	if _, err := s.queries.GetAlbum(id); errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "album not found")
-		return
-	}
-	tracks, err := s.queries.ListTracksByAlbum(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list tracks")
-		return
-	}
-
-	byDir := map[string]int{}
-	var dir string
-	best := 0
-	for _, t := range tracks {
-		if t.FilePath == nil || *t.FilePath == "" {
-			continue
-		}
-		d := filepath.Dir(library.ResolvePath(s.libraryDir, *t.FilePath))
-		byDir[d]++
-		if byDir[d] > best {
-			best, dir = byDir[d], d
-		}
-	}
-	if dir == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"dir": nil, "files": []any{}})
-		return
-	}
-
-	type entry struct {
-		Name string `json:"name"`
-		Size int64  `json:"size"`
-	}
-	files := []entry{}
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return nil
-		}
-		files = append(files, entry{Name: rel, Size: info.Size()})
-		return nil
-	})
-
-	writeJSON(w, http.StatusOK, map[string]any{"dir": dir, "files": files})
 }
 
 // Unwatch

@@ -17,13 +17,6 @@ export default function AlbumDetail() {
 
   const { toast } = useToast();
   const [coverFailed, setCoverFailed] = useState<string | null>(null);
-  const [showFiles, setShowFiles] = useState(false);
-
-  const { data: albumFiles } = useQuery({
-    queryKey: ['album-files', id],
-    queryFn: () => api.getAlbumFiles(Number(id)),
-    enabled: showFiles,
-  });
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', id],
@@ -117,6 +110,7 @@ export default function AlbumDetail() {
     mutationFn: () => api.ignoreAlbum(Number(id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     },
   });
@@ -125,6 +119,7 @@ export default function AlbumDetail() {
     mutationFn: () => api.unignoreAlbum(Number(id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     },
   });
@@ -373,15 +368,6 @@ export default function AlbumDetail() {
             )}
           </div>
         </div>
-        <button
-          onClick={() => setShowFiles(true)}
-          className="p-1.5 rounded-lg transition-colors shrink-0 text-zinc-500 bg-zinc-800 active:bg-zinc-700"
-          title="Browse album folder"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-          </svg>
-        </button>
         {album.provider !== 'local' && (
           <button
             onClick={() => refreshAlbum.mutate()}
@@ -774,33 +760,6 @@ export default function AlbumDetail() {
             )}
             {selectedTrack.downloaded_from && <DetailRow label="Source">{selectedTrack.downloaded_from}</DetailRow>}
             {selectedTrack.file_path && <DetailRow label="Path">{selectedTrack.file_path}</DetailRow>}
-          </div>
-        )}
-      </DetailSheet>
-
-      <DetailSheet
-        open={showFiles}
-        onClose={() => setShowFiles(false)}
-        title="Album folder"
-      >
-        {albumFiles?.dir && (
-          <p className="text-[11px] text-zinc-500 font-mono break-all mb-2 select-all">{albumFiles.dir}</p>
-        )}
-        {!albumFiles && <p className="text-xs text-zinc-500 py-2">Loading…</p>}
-        {albumFiles && albumFiles.files.length === 0 && (
-          <p className="text-xs text-zinc-500 py-2">No files on disk for this album</p>
-        )}
-        {albumFiles && albumFiles.files.length > 0 && (
-          <div className="space-y-1">
-            {albumFiles.files.map((f) => (
-              <div key={f.name} className="flex items-center gap-2.5 py-1">
-                <svg className="w-3.5 h-3.5 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" />
-                </svg>
-                <span className="flex-1 min-w-0 text-xs font-mono text-zinc-300 truncate" title={f.name}>{f.name}</span>
-                <span className="text-[10px] text-zinc-600 tabular-nums shrink-0">{formatFileSize(f.size)}</span>
-              </div>
-            ))}
           </div>
         )}
       </DetailSheet>

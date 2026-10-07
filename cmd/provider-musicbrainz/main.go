@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -172,10 +173,11 @@ func (s *server) GetArtist(ctx context.Context, req *pb.EntityRequest) (*pb.Arti
 func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumList, error) {
 	var resp struct {
 		ReleaseGroups []struct {
-			ID               string `json:"id"`
-			Title            string `json:"title"`
-			PrimaryType      string `json:"primary-type"`
-			FirstReleaseDate string `json:"first-release-date"`
+			ID               string   `json:"id"`
+			Title            string   `json:"title"`
+			PrimaryType      string   `json:"primary-type"`
+			SecondaryTypes   []string `json:"secondary-types"`
+			FirstReleaseDate string   `json:"first-release-date"`
 		} `json:"release-groups"`
 	}
 
@@ -196,6 +198,17 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 		case "Compilation":
 			recordType = "compilation"
 		}
+		// Secondary types ("Album + Live", "Album + Compilation") re-sort the
+		// release into that section; Crate defaults them to ignored.
+		if len(rg.SecondaryTypes) > 0 {
+			recordType = normalizeSecondaryType(rg.SecondaryTypes[0])
+		}
+		meta := map[string]string{
+			"release_date": rg.FirstReleaseDate,
+		}
+		if len(rg.SecondaryTypes) > 0 {
+			meta["secondary_types"] = strings.Join(rg.SecondaryTypes, ",")
+		}
 		albums = append(albums, &pb.AlbumSummary{
 			Id:         rg.ID,
 			Title:      rg.Title,
@@ -203,13 +216,32 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 			CoverUrl:   "https://coverartarchive.org/release-group/" + rg.ID + "/front-250",
 			RecordType: recordType,
 			Rank:       int32(len(resp.ReleaseGroups) - i),
-			Metadata: map[string]string{
-				"release_date": rg.FirstReleaseDate,
-			},
+			Metadata:   meta,
 		})
 	}
 
 	return &pb.AlbumList{Albums: albums}, nil
+}
+
+// normalizeSecondaryType maps a MusicBrainz secondary release-group type to a
+// crate record_type. Secondary types get their own sections and default to
+// ignored — compilation maps onto the existing section, the rest become their
+// own (live, remix, soundtrack, ...).
+func normalizeSecondaryType(t string) string {
+	switch t {
+	case "Compilation":
+		return "compilation"
+	case "DJ-mix":
+		return "dj-mix"
+	case "Mixtape/Street":
+		return "mixtape"
+	case "Field recording":
+		return "field-recording"
+	case "Audio drama":
+		return "audio-drama"
+	default:
+		return strings.ToLower(strings.NewReplacer(" ", "-", "/", "-").Replace(t))
+	}
 }
 
 // mbTrack/mbMedia are the shared shape of a release's track listing.

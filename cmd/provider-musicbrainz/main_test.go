@@ -91,6 +91,20 @@ func newFakeMusicBrainzAPI() *httptest.Server {
 					"primary-type":       "Single",
 					"first-release-date": "1992-09-21",
 				},
+				{
+					"id":                 "d3e4f5a6-3c5d-6e7f-1a2b-3c4d5e6f7a8b",
+					"title":              "OK Computer Live",
+					"primary-type":       "Album",
+					"secondary-types":    []string{"Live"},
+					"first-release-date": "2007-03-01",
+				},
+				{
+					"id":                 "e4f5a6b7-4d6e-7f8a-2b3c-4d5e6f7a8b9c",
+					"title":              "OK Computer Outtakes",
+					"primary-type":       "Album",
+					"secondary-types":    []string{"Compilation"},
+					"first-release-date": "2017-06-23",
+				},
 			},
 		})
 	})
@@ -219,8 +233,8 @@ func TestMusicBrainzGetArtistAlbums(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Albums) != 2 {
-		t.Fatalf("expected 2 albums, got %d", len(resp.Albums))
+	if len(resp.Albums) != 4 {
+		t.Fatalf("expected 4 albums, got %d", len(resp.Albums))
 	}
 	if resp.Albums[0].Title != "OK Computer" {
 		t.Errorf("expected 'OK Computer', got %q", resp.Albums[0].Title)
@@ -236,6 +250,20 @@ func TestMusicBrainzGetArtistAlbums(t *testing.T) {
 	}
 	if resp.Albums[0].Metadata["release_date"] != "1997-06-16" {
 		t.Errorf("expected release_date metadata, got %v", resp.Albums[0].Metadata)
+	}
+	// "Album + Live" sorts as live; "Album + Compilation" as compilation —
+	// both carry the secondary_types marker so they default to ignored.
+	if resp.Albums[2].RecordType != "live" {
+		t.Errorf("expected record_type 'live' for OK Computer Live, got %q", resp.Albums[2].RecordType)
+	}
+	if resp.Albums[2].Metadata["secondary_types"] != "Live" {
+		t.Errorf("expected secondary_types 'Live', got %v", resp.Albums[2].Metadata)
+	}
+	if resp.Albums[3].RecordType != "compilation" {
+		t.Errorf("expected record_type 'compilation' for OK Computer Outtakes, got %q", resp.Albums[3].RecordType)
+	}
+	if resp.Albums[3].Metadata["secondary_types"] != "Compilation" {
+		t.Errorf("expected secondary_types 'Compilation', got %v", resp.Albums[3].Metadata)
 	}
 }
 
