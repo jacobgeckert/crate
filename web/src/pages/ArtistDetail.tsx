@@ -23,6 +23,7 @@ export default function ArtistDetail() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [trackFilter, setTrackFilter] = useState('');
+  const [missingOnly, setMissingOnly] = useState(false);
   const [showRelinkSearch, setShowRelinkSearch] = useState(false);
   const [relinkQuery, setRelinkQuery] = useState('');
   const [relinkProvider, setRelinkProvider] = useState('');
@@ -205,13 +206,22 @@ export default function ArtistDetail() {
 
   const filteredAlbums = useMemo((): Album[] => {
     if (!artist?.albums) return [];
-    if (!trackFilter) return artist.albums;
     const q = trackFilter.toLowerCase();
     return artist.albums.filter((album) => {
+      // Missing = a track that isn't owned or deliberately ignored; ignored
+      // albums are opted out of collection tracking entirely.
+      if (missingOnly) {
+        if (album.status === 'ignored') return false;
+        const hasMissing = album.tracks?.some(
+          (t) => t.status !== 'owned' && t.status !== 'ignored',
+        );
+        if (!hasMissing) return false;
+      }
+      if (!q) return true;
       if (album.title.toLowerCase().includes(q)) return true;
       return album.tracks?.some((t) => t.title.toLowerCase().includes(q)) ?? false;
     });
-  }, [artist, trackFilter]);
+  }, [artist, trackFilter, missingOnly]);
 
   const albumGroups = useMemo(() => {
     const groups = new Map<string, Album[]>();
@@ -538,13 +548,30 @@ export default function ArtistDetail() {
       {artist.albums && artist.albums.length > 0 && (
         <div>
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Releases</p>
-          <FilterBar
-            value={trackFilter}
-            onChange={setTrackFilter}
-            placeholder="Filter by song or album title..."
-          />
-          {trackFilter && filteredAlbums.length === 0 && (
-            <p className="text-zinc-500 text-sm text-center py-4">No matching albums or tracks</p>
+          <div className="flex gap-2">
+            <div className="flex-1 min-w-0">
+              <FilterBar
+                value={trackFilter}
+                onChange={setTrackFilter}
+                placeholder="Filter by song or album title..."
+              />
+            </div>
+            <button
+              onClick={() => setMissingOnly((v) => !v)}
+              className={`shrink-0 h-9 px-3 rounded-lg text-xs font-medium border transition-colors mb-3 ${
+                missingOnly
+                  ? 'bg-amber-900/40 text-amber-300 border-amber-700/50'
+                  : 'bg-zinc-800/60 text-zinc-500 border-transparent active:bg-zinc-800'
+              }`}
+              title="Show only releases with missing tracks"
+            >
+              Missing
+            </button>
+          </div>
+          {(trackFilter || missingOnly) && filteredAlbums.length === 0 && (
+            <p className="text-zinc-500 text-sm text-center py-4">
+              {missingOnly && !trackFilter ? 'No releases with missing tracks' : 'No matching albums or tracks'}
+            </p>
           )}
           {albumGroups.map((group) => (
             <div key={group.type}>
