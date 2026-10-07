@@ -119,6 +119,7 @@ type Track struct {
 	UpdatedAt          string      `json:"updated_at" db:"updated_at"`
 	AlbumTitle         string      `json:"album_title,omitempty"`
 	ArtistName         string      `json:"artist_name,omitempty"`
+	AlbumCoverURL      *string     `json:"album_cover_url,omitempty"`
 }
 
 type QualityTier struct {

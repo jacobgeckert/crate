@@ -967,7 +967,7 @@ func (q *Queries) ListDownloads(status string) ([]models.DownloadQueueItem, erro
 
 func (q *Queries) ListDownloadsWithTrack(status string) ([]models.DownloadQueueItem, error) {
 	query := `SELECT d.id, d.track_id, d.slskd_search_id, d.status, d.attempts, d.last_attempt, d.error, d.next_retry_at, d.source, d.last_progress_bytes, d.created_at,
-		        t.title, ar.name, al.title
+		        t.title, ar.name, al.title, t.album_id, t.disc_number, t.track_number, al.cover_url
 		 FROM download_queue d
 		 JOIN tracks t ON t.id = d.track_id
 		 JOIN albums al ON al.id = t.album_id
@@ -989,12 +989,19 @@ func (q *Queries) ListDownloadsWithTrack(status string) ([]models.DownloadQueueI
 	for rows.Next() {
 		var d models.DownloadQueueItem
 		var trackTitle, artistName, albumTitle string
+		var albumID int64
+		var discNum, trackNum int
+		var coverURL *string
 		if err := rows.Scan(&d.ID, &d.TrackID, &d.SlskdSearchID, &d.Status, &d.Attempts,
 			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.LastProgressBytes, &d.CreatedAt,
-			&trackTitle, &artistName, &albumTitle); err != nil {
+			&trackTitle, &artistName, &albumTitle, &albumID, &discNum, &trackNum, &coverURL); err != nil {
 			return nil, err
 		}
-		d.Track = &models.Track{ID: d.TrackID, Title: trackTitle, ArtistName: artistName, AlbumTitle: albumTitle}
+		d.Track = &models.Track{
+			ID: d.TrackID, AlbumID: albumID, Title: trackTitle,
+			ArtistName: artistName, AlbumTitle: albumTitle, AlbumCoverURL: coverURL,
+			DiscNumber: discNum, TrackNumber: trackNum,
+		}
 		items = append(items, d)
 	}
 	return items, rows.Err()

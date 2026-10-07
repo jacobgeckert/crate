@@ -82,6 +82,9 @@ func (s *Service) CancelTransfer(ctx context.Context, d *models.DownloadQueueIte
 }
 
 type ProgressItem struct {
+	// Key is "username|transferID" — matches download_queue.slskd_search_id
+	// so the UI can attach live progress to a queued track.
+	Key              string  `json:"key"`
 	Username         string  `json:"username"`
 	Filename         string  `json:"filename"`
 	PercentComplete  float64 `json:"percent_complete"`
@@ -119,6 +122,7 @@ func (s *Service) GetProgress(ctx context.Context) ([]ProgressItem, error) {
 					continue
 				}
 				items = append(items, ProgressItem{
+					Key:              ud.Username + "|" + f.ID,
 					Username:         ud.Username,
 					Filename:         filepath.Base(f.Filename),
 					PercentComplete:  f.PercentComplete,

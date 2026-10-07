@@ -64,6 +64,7 @@ export interface Track {
   updated_at: string;
   album_title?: string;
   artist_name?: string;
+  album_cover_url?: string;
 }
 
 export interface DownloadQueueItem {
@@ -133,6 +134,7 @@ export interface BrowseTrackResult {
 }
 
 export interface DownloadProgress {
+  key: string;
   username: string;
   filename: string;
   percent_complete: number;
