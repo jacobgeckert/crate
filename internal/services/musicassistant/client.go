@@ -84,8 +84,8 @@ type Client struct {
 	wsURL string
 	token string
 
-	onEvent func(Event)             // must not block: called from the read loop
-	onReady func(context.Context)   // run (in a goroutine) after each authentication
+	onEvent func(Event)           // must not block: called from the read loop
+	onReady func(context.Context) // run (in a goroutine) after each authentication
 
 	seq     atomic.Uint64
 	writeMu sync.Mutex // serializes writes — coder/websocket permits one writer
