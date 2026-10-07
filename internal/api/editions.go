@@ -88,7 +88,8 @@ func (s *Server) handleGetAlbumEditions(w http.ResponseWriter, r *http.Request) 
 
 // handleRefreshAlbum re-pulls one album's tracklist from its provider —
 // honoring a pinned edition — re-folds tracks (recording-id merge included),
-// and re-resolves cover art. The single-album counterpart of artist refresh.
+// and re-resolves cover art. Runs in the background; progress is published on
+// album.sync via GET /albums/{id}, so every device sees the same phases.
 func (s *Server) handleRefreshAlbum(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
@@ -108,15 +109,43 @@ func (s *Server) handleRefreshAlbum(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "album is not linked to a provider")
 		return
 	}
+	if v, ok := s.albumSync.Load(id); ok && v.(*models.SyncInfo).Active {
+		writeError(w, http.StatusConflict, "album refresh already running")
+		return
+	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	s.reconcileAlbumTracks(ctx, album.Provider, album.ID, album.ProviderID)
-	s.enrichAlbumCover(ctx, album.ID)
-	s.activityLog.Record("album_refresh", "album", album.ID,
-		fmt.Sprintf("Refreshed %s from %s", album.Title, album.Provider))
+	providerName, albumID, title := album.Provider, album.ID, album.Title
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		defer s.finishAlbumSync(albumID)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Fetching tracklist from provider"})
+		detail, err := s.providers.GetAlbum(ctx, providerName, album.TracklistID())
+		if err != nil {
+			slog.Error("refresh: tracklist fetch failed", "album", title, "provider", providerName, "error", err)
+			return
+		}
+
+		trackStatus := models.TrackStatusWanted
+		if album.Status == models.AlbumStatusIgnored {
+			trackStatus = models.TrackStatusIgnored
+		}
+		s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Syncing tracks", Total: len(detail.Tracks)})
+		added, matched, merged, _ := s.foldAlbumTracks(providerName, albumID, title, trackStatus, detail, false)
+
+		s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Resolving cover art"})
+		s.enrichAlbumCover(ctx, albumID)
+
+		slog.Info("refresh: album refreshed", "album", title, "provider", providerName,
+			"tracks", len(detail.Tracks), "added", added, "matched", matched, "merged", merged)
+		s.activityLog.Record("album_refresh", "album", albumID, fmt.Sprintf(
+			"Refreshed %s from %s — %d track(s), %d added", title, providerName, len(detail.Tracks), added))
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 }
 
 // handleSetAlbumEdition pins an album to a specific provider release (or back

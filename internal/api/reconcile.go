@@ -333,6 +333,21 @@ func foldEqual(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
+// setAlbumSync/finishAlbumSync publish live refresh progress for the album
+// detail page's polling banner — shared server-side, so a refresh kicked off
+// on one device shows on others.
+func (s *Server) setAlbumSync(albumID int64, st *models.SyncInfo) {
+	s.albumSync.Store(albumID, st)
+}
+
+func (s *Server) finishAlbumSync(albumID int64) {
+	if v, ok := s.albumSync.Load(albumID); ok {
+		st := *v.(*models.SyncInfo)
+		st.Active = false
+		s.albumSync.Store(albumID, &st)
+	}
+}
+
 // setSync/finishSync publish live discography-sync progress for the artist
 // detail page's polling banner. finishSync flips Active off but keeps the
 // final counts so the UI can show the completed state.

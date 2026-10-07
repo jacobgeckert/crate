@@ -21,7 +21,9 @@ export default function AlbumDetail() {
     queryKey: ['album', id],
     queryFn: () => api.getAlbum(Number(id)),
     enabled: !!id,
-    refetchInterval: 10_000,
+    // Live cadence while a refresh is running; 10s ambient otherwise picks up
+    // refreshes started on other devices (server-shared sync state).
+    refetchInterval: (query) => (query.state.data?.sync?.active ? 2000 : 10_000),
   });
 
   const { data: downloads } = useQuery({
@@ -98,6 +100,10 @@ export default function AlbumDetail() {
       queryClient.invalidateQueries({ queryKey: ['album-editions', id] });
     },
   });
+
+  // Server-reported album sync is device-independent — a refresh started on
+  // another device shows here too once the ambient poll sees it.
+  const syncing = refreshAlbum.isPending || !!album?.sync?.active;
 
   const ignoreAlbum = useMutation({
     mutationFn: () => api.ignoreAlbum(Number(id)),
@@ -319,11 +325,11 @@ export default function AlbumDetail() {
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
-        <div className="self-stretch aspect-square rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+        <div className="self-stretch shrink-0 rounded-lg bg-zinc-800 overflow-hidden">
           {album.cover_url ? (
-            <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
+            <img src={album.cover_url} alt={album.title} className="h-full aspect-square object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-zinc-600">
+            <div className="h-full aspect-square flex items-center justify-center text-zinc-600">
               <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" /></svg>
             </div>
           )}
@@ -362,11 +368,11 @@ export default function AlbumDetail() {
         {album.provider !== 'local' && (
           <button
             onClick={() => refreshAlbum.mutate()}
-            disabled={refreshAlbum.isPending}
+            disabled={syncing}
             className="p-1.5 rounded-lg transition-colors shrink-0 text-zinc-500 bg-zinc-800 active:bg-zinc-700 disabled:opacity-50"
             title="Refresh tracklist & cover from provider"
           >
-            <svg className={`w-4 h-4 ${refreshAlbum.isPending ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21.5 2v6h-6M2.5 22v-6h6" /><path d="M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
             </svg>
           </button>
@@ -393,6 +399,20 @@ export default function AlbumDetail() {
           Delete
         </button>
       </div>
+
+      {syncing && (
+        <div className="flex items-center gap-2.5 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2.5 mb-4">
+          <div className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm text-blue-300">
+              {album?.sync?.phase ?? 'Starting refresh…'}
+            </p>
+            {album?.sync?.active && album.sync.total > 0 && (
+              <p className="text-[11px] text-blue-400/70 truncate">{album.sync.total} tracks in provider listing</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {album.provider === 'local' && (
         <div className="bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2.5 mb-4">

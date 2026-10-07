@@ -676,6 +676,9 @@ func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
 
 	tracks, _ := s.queries.ListTracksByAlbum(id)
 	album.Tracks = tracks
+	if v, ok := s.albumSync.Load(id); ok {
+		album.Sync = v.(*models.SyncInfo)
+	}
 
 	writeJSON(w, http.StatusOK, album)
 }

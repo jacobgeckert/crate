@@ -84,6 +84,9 @@ type Album struct {
 	UpdatedAt   string      `json:"updated_at" db:"updated_at"`
 	ArtistName  string      `json:"artist_name,omitempty"`
 	Tracks      []Track     `json:"tracks,omitempty"`
+	// Sync is a live snapshot of an album-refresh in progress — set only by
+	// the album detail endpoint while the refresh goroutine is running.
+	Sync *SyncInfo `json:"sync,omitempty"`
 }
 
 // TracklistID is the provider id to fetch this album's tracklist from — the

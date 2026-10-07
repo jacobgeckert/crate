@@ -37,6 +37,9 @@ type Server struct {
 	// syncStatus: artistID → *models.SyncInfo — live discography-sync progress
 	// for the artist detail page's polling banner.
 	syncStatus sync.Map
+	// albumSync: albumID → *models.SyncInfo — live album-refresh progress for
+	// the album detail page's polling banner.
+	albumSync  sync.Map
 	startTime  time.Time
 	libraryDir string
 	version    string

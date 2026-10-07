@@ -33,6 +33,7 @@ export interface Album {
   updated_at: string;
   artist_name?: string;
   tracks?: Track[];
+  sync?: { active: boolean; phase?: string; total: number; done: number; current?: string };
 }
 
 export interface AlbumEdition {
