@@ -138,6 +138,7 @@ func (s *Server) handleSetAlbumEdition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	added, matched, merged, pruned := s.foldAlbumTracks(album.Provider, album.ID, album.Title, trackStatus, detail, true)
+	s.enrichAlbumCover(ctx, album.ID) // pinned edition gets its own cover art
 
 	slog.Info("edition: switched", "album", album.Title, "release_id", req.ReleaseID,
 		"matched", matched, "added", added, "merged", merged, "pruned", pruned)

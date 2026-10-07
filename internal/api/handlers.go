@@ -326,6 +326,7 @@ func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, alb
 				s.queries.BackfillAlbumReleaseDate(existingAlbum.ID, d)
 			}
 			s.syncAlbumTracks(ctx, providerName, existingAlbum)
+			s.enrichAlbumCover(ctx, existingAlbum.ID)
 			s.demoteUnownedAlbum(existingAlbum)
 			continue
 		}
@@ -432,6 +433,7 @@ func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string,
 			tracks++
 		}
 	}
+	s.enrichAlbumCover(ctx, album.ID)
 	slog.Info("sync: added release", "album", pa.Title, "type", pa.RecordType, "provider", providerName, "tracks", tracks, "status", albumStatus)
 	return albumStatus
 }
@@ -511,6 +513,12 @@ func (s *Server) handleWatchAlbum(w http.ResponseWriter, r *http.Request) {
 			Status:      models.TrackStatusWanted,
 		})
 	}
+
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		s.enrichAlbumCover(context.Background(), album.ID)
+	}()
 
 	writeJSON(w, http.StatusCreated, album)
 }

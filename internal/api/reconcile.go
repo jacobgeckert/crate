@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -83,6 +84,7 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 			}
 			// Already ours on this provider — fill any tracks it's newly listing.
 			s.reconcileAlbumTracks(ctx, providerName, a.ID, pa.Id)
+			s.enrichAlbumCover(ctx, a.ID)
 			s.demoteUnownedAlbum(a)
 			continue
 		}
@@ -97,6 +99,7 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 				s.queries.BackfillAlbumReleaseDate(match.ID, d)
 			}
 			s.reconcileAlbumTracks(ctx, providerName, match.ID, pa.Id)
+			s.enrichAlbumCover(ctx, match.ID)
 			s.demoteUnownedAlbum(match)
 			continue
 		}
@@ -388,6 +391,115 @@ func (s *Server) enrichArtistImage(ctx context.Context, artistID int64) {
 		return
 	}
 	slog.Info("image: artist image updated", "artist", artist.Name, "source", imageProvider)
+}
+
+// enrichAlbumCover resolves real cover art for an album. MusicBrainz provider
+// ids are release-groups whose Cover Art Archive URL is only a guess — CAA
+// 404s for releases with no submitted art, so the URL is verified with a HEAD
+// before trusting it (a pinned edition's release art is preferred over the
+// release-group's). When CAA has nothing, the Deezer catalog is searched by
+// artist+title for a cover. Albums already carrying non-CAA art (Deezer,
+// manual) are left alone. Runs inside background sync work.
+func (s *Server) enrichAlbumCover(ctx context.Context, albumID int64) {
+	album, err := s.queries.GetAlbum(albumID)
+	if err != nil || album == nil {
+		return
+	}
+	cur := ""
+	if album.CoverURL != nil {
+		cur = *album.CoverURL
+	}
+	if cur != "" && !strings.Contains(cur, "coverartarchive.org") {
+		return
+	}
+
+	if album.Provider == "musicbrainz" && album.ProviderID != "" {
+		var cands []string
+		if album.ReleaseID != nil && *album.ReleaseID != "" {
+			cands = append(cands, "https://coverartarchive.org/release/"+*album.ReleaseID+"/front-500")
+		}
+		cands = append(cands, "https://coverartarchive.org/release-group/"+album.ProviderID+"/front-500")
+		for _, u := range cands {
+			if !coverArtExists(ctx, u) {
+				continue
+			}
+			if u != cur {
+				if err := s.queries.SetAlbumCoverURL(album.ID, u); err != nil {
+					slog.Error("image: save album cover", "album", album.Title, "error", err)
+				} else {
+					slog.Info("image: album cover updated", "album", album.Title, "source", "coverartarchive")
+				}
+			}
+			return // either just stored u, or cur verified still resolving
+		}
+	}
+
+	if cover := s.deezerAlbumCover(ctx, album); cover != "" {
+		if err := s.queries.SetAlbumCoverURL(album.ID, cover); err != nil {
+			slog.Error("image: save album cover", "album", album.Title, "error", err)
+		} else {
+			slog.Info("image: album cover updated", "album", album.Title, "source", "deezer")
+		}
+	}
+}
+
+// deezerAlbumCover finds a Deezer album matching this album's artist+title and
+// returns its cover url, or "" when Deezer is unhealthy / has no match.
+func (s *Server) deezerAlbumCover(ctx context.Context, album *models.Album) string {
+	const imageProvider = "deezer"
+	if !s.providers.IsHealthy(imageProvider) {
+		return ""
+	}
+	artist, err := s.queries.GetArtist(album.ArtistID)
+	if err != nil || artist == nil {
+		return ""
+	}
+	res, err := s.providers.SearchWithProvider(ctx, imageProvider, artist.Name, 5, 0)
+	if err != nil {
+		slog.Warn("image: deezer artist search failed", "artist", artist.Name, "error", err)
+		return ""
+	}
+	artistID := ""
+	for _, a := range res.Artists {
+		if strings.EqualFold(a.Name, artist.Name) {
+			artistID = a.Id
+			break
+		}
+	}
+	if artistID == "" && len(res.Artists) > 0 {
+		artistID = res.Artists[0].Id
+	}
+	if artistID == "" {
+		return ""
+	}
+	albums, err := s.providers.GetArtistAlbums(ctx, imageProvider, artistID)
+	if err != nil {
+		slog.Warn("image: deezer album lookup failed", "artist", artist.Name, "error", err)
+		return ""
+	}
+	for _, pa := range albums.Albums {
+		if pa.CoverUrl != "" && foldEqual(pa.Title, album.Title) {
+			return pa.CoverUrl
+		}
+	}
+	return "" // no title match — a wrong album's cover is worse than none
+}
+
+var caaClient = &http.Client{Timeout: 8 * time.Second}
+
+// coverArtExists HEADs a Cover Art Archive URL; CAA 307s to archive.org when
+// art exists and 404s when the release/group has no submitted art.
+func coverArtExists(ctx context.Context, url string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := caaClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // newReleaseWatch captures an artist's effective new-release watch config once
