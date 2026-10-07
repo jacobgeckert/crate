@@ -17,6 +17,9 @@ export default function AlbumDetail() {
 
   const { toast } = useToast();
   const [coverFailed, setCoverFailed] = useState<string | null>(null);
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitSel, setSplitSel] = useState<Set<number>>(new Set());
+  const [splitRelease, setSplitRelease] = useState('');
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', id],
@@ -150,12 +153,13 @@ export default function AlbumDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
-  const splitEdition = useMutation({
-    mutationFn: (releaseId: string) => api.splitAlbumEdition(Number(id), releaseId),
+  const splitTracks = useMutation({
+    mutationFn: ({ releaseId, trackIds }: { releaseId: string; trackIds: number[] }) =>
+      api.splitAlbumTracks(Number(id), releaseId, trackIds),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['album'] });
       queryClient.invalidateQueries({ queryKey: ['artist'] });
-      toast(`Edition split into a separate album — ${res.moved} track(s) moved, ${res.added} added`, 'success');
+      toast(`Tracks split into a separate album — ${res.moved} moved, ${res.added} added`, 'success');
       navigate(`/album/${res.album_id}`);
     },
     onError: (err: Error) => toast(err.message, 'error'),
@@ -310,6 +314,24 @@ export default function AlbumDetail() {
     return album.tracks.filter((t) => t.title.toLowerCase().includes(q));
   }, [album, trackFilter]);
 
+  const splitTargets = useMemo(
+    () => editions?.editions.filter((e) => e.id !== album?.release_id) ?? [],
+    [editions, album],
+  );
+
+  const toggleSplitSel = (trackId: number) =>
+    setSplitSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(trackId)) next.delete(trackId); else next.add(trackId);
+      return next;
+    });
+
+  const exitSplitMode = () => {
+    setSplitMode(false);
+    setSplitSel(new Set());
+    setSplitRelease('');
+  };
+
   const wantedTracks = useMemo(
     () => album?.tracks?.filter((t) => t.status === 'wanted') ?? [],
     [album]
@@ -378,31 +400,6 @@ export default function AlbumDetail() {
               </select>
             )}
           </div>
-          {editions && editions.editions.filter((e) => e.id !== album.release_id).length > 0 && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <select
-                value=""
-                disabled={splitEdition.isPending}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v) splitEdition.mutate(v);
-                  e.target.value = '';
-                }}
-                className="h-7 min-w-0 max-w-full text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 disabled:opacity-50"
-                title="Create a separate album for an edition — matching tracks move over (e.g. an instrumental release you also own)"
-              >
-                <option value="">Split edition into separate album…</option>
-                {editions.editions
-                  .filter((e) => e.id !== album.release_id)
-                  .map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
-                      {e.track_count ? ` (${e.track_count} tracks)` : ''}
-                    </option>
-                  ))}
-              </select>
-            </div>
-          )}
         </div>
         {album.provider !== 'local' && (
           <button
@@ -521,7 +518,17 @@ export default function AlbumDetail() {
 
       {album.tracks && album.tracks.length > 0 && (
         <div>
-          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Tracks</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Tracks</p>
+            {splitTargets.length > 0 && (
+              <button
+                onClick={() => (splitMode ? exitSplitMode() : setSplitMode(true))}
+                className="px-2 py-0.5 rounded text-[10px] font-medium uppercase text-zinc-500 bg-zinc-800 active:bg-zinc-700 transition-colors"
+              >
+                {splitMode ? 'Cancel' : 'Split'}
+              </button>
+            )}
+          </div>
           {album.tracks.length > 3 && (
             <FilterBar
               value={trackFilter}
@@ -541,10 +548,25 @@ export default function AlbumDetail() {
               const isLinkOpen = linkTrackId === track.id;
               return (
                 <div key={track.id}>
-                  <div className="flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer active:bg-zinc-800/50 transition-colors" onClick={() => setSelectedTrack(track)}>
-                    <span className="text-[11px] text-zinc-600 w-5 text-right shrink-0 tabular-nums">
-                      {track.track_number}
-                    </span>
+                  <div
+                    className={`flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer active:bg-zinc-800/50 transition-colors ${
+                      splitMode && splitSel.has(track.id) ? 'bg-blue-900/20' : ''
+                    }`}
+                    onClick={() => (splitMode ? toggleSplitSel(track.id) : setSelectedTrack(track))}
+                  >
+                    {splitMode ? (
+                      <input
+                        type="checkbox"
+                        checked={splitSel.has(track.id)}
+                        onChange={() => toggleSplitSel(track.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-4 h-4 shrink-0 accent-blue-500"
+                      />
+                    ) : (
+                      <span className="text-[11px] text-zinc-600 w-5 text-right shrink-0 tabular-nums">
+                        {track.track_number}
+                      </span>
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm truncate">{track.title}</p>
                       <p className="text-[11px] text-zinc-600 tabular-nums">{formatDuration(track.duration_ms)}</p>
@@ -775,6 +797,37 @@ export default function AlbumDetail() {
               );
             })}
           </div>
+          {splitMode && (
+            <div className="flex items-center gap-2 mt-2 bg-zinc-800/60 rounded-lg px-3 py-2">
+              <span className="text-xs text-zinc-400 shrink-0">{splitSel.size} selected</span>
+              <select
+                value={splitRelease}
+                onChange={(e) => setSplitRelease(e.target.value)}
+                className="flex-1 min-w-0 h-7 text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5"
+              >
+                <option value="">Move to release…</option>
+                {splitTargets.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
+                    {e.track_count ? ` (${e.track_count} tracks)` : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => splitTracks.mutate({ releaseId: splitRelease, trackIds: [...splitSel] })}
+                disabled={splitSel.size === 0 || !splitRelease || splitTracks.isPending}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white active:bg-blue-700 transition-colors disabled:opacity-40 shrink-0"
+              >
+                {splitTracks.isPending ? 'Splitting…' : 'Split'}
+              </button>
+              <button
+                onClick={exitSplitMode}
+                className="px-2 py-1.5 rounded-lg text-xs text-zinc-500 active:text-zinc-300 transition-colors shrink-0"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
       )}
 

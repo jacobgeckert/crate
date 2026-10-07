@@ -944,10 +944,10 @@ func TestSetAlbumEditionReFoldsTracks(t *testing.T) {
 	}
 }
 
-// TestSplitAlbumEdition: splitting an edition into its own album moves the
-// matching track rows (provider-id, recording-id, title-fold order) while the
-// source album keeps the rows that belong to its own edition.
-func TestSplitAlbumEdition(t *testing.T) {
+// TestSplitTracks: splitting selected tracks onto a release moves only the
+// chosen rows (relinking them to the release's track ids) and fills out the
+// rest of the release tracklist; the source keeps everything else.
+func TestSplitTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
 
@@ -980,9 +980,10 @@ func TestSplitAlbumEdition(t *testing.T) {
 	env.queries.CreateTrack(&inst2)
 	env.queries.UpdateTrackFilePath(inst2.ID, "Album Two/02-inst.flac")
 
-	w := env.do("POST", fmt.Sprintf("/api/albums/%d/split-edition", two.ID), `{"release_id": "rel-2001-inst"}`)
+	body := fmt.Sprintf(`{"release_id": "rel-2001-inst", "track_ids": [%d, %d]}`, inst1.ID, inst2.ID)
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/split-tracks", two.ID), body)
 	if w.Code != 200 {
-		t.Fatalf("split edition: expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("split tracks: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	res := decode[struct {
 		AlbumID int64 `json:"album_id"`
@@ -1020,10 +1021,10 @@ func TestSplitAlbumEdition(t *testing.T) {
 		t.Fatalf("source album tracks = %+v, want just Track B1", srcTracks)
 	}
 
-	// Splitting the same release again conflicts — the album now exists.
-	w = env.do("POST", fmt.Sprintf("/api/albums/%d/split-edition", two.ID), `{"release_id": "rel-2001-inst"}`)
+	// Splitting into the album itself is rejected.
+	w = env.do("POST", fmt.Sprintf("/api/albums/%d/split-tracks", split.ID), `{"release_id": "rel-2001-inst", "track_ids": [1]}`)
 	if w.Code != 409 {
-		t.Errorf("re-split: expected 409, got %d", w.Code)
+		t.Errorf("self-split: expected 409, got %d", w.Code)
 	}
 }
 
