@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -425,4 +427,118 @@ func matchProviderTrack(t *models.Track, pts []*pb.TrackInfo) *pb.TrackInfo {
 		}
 	}
 	return nil
+}
+
+var mbIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// parseMusicBrainzLink extracts a release or release-group MBID from a
+// MusicBrainz URL. Bare MBIDs are accepted too — the provider tries the id as
+// a release-group first, then as a release.
+func parseMusicBrainzLink(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if mbIDRe.MatchString(raw) {
+		return raw, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Host != "musicbrainz.org" && u.Host != "www.musicbrainz.org") {
+		return "", errors.New("expected a musicbrainz.org release or release-group link")
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 || (parts[0] != "release" && parts[0] != "release-group") || !mbIDRe.MatchString(parts[1]) {
+		return "", errors.New("expected a musicbrainz.org/release/… or /release-group/… link")
+	}
+	return parts[1], nil
+}
+
+// handleAddArtistRelease manually adds one release to an artist from a
+// MusicBrainz link — covering releases the artist's discography doesn't list
+// (VA appearances, wrong-artist-grouped entries, orphaned editions). A
+// release-group link lands as a normal album; a release link lands
+// release-keyed like a split target, so it stays a distinct edition even when
+// its release-group is already in the library. Explicitly added releases are
+// watched regardless of type — the user asked for them.
+func (s *Server) handleAddArtistRelease(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	artist, err := s.queries.GetArtist(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get artist")
+		return
+	}
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	mbid, err := parseMusicBrainzLink(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	const providerName = "musicbrainz"
+	if !s.providers.IsHealthy(providerName) {
+		writeError(w, http.StatusServiceUnavailable, "musicbrainz provider is not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	detail, err := s.providers.GetAlbum(ctx, providerName, mbid)
+	if err != nil || detail == nil {
+		writeError(w, http.StatusBadGateway, "release not found on MusicBrainz")
+		return
+	}
+
+	if existing, _ := s.queries.FindAlbumByProvider(providerName, detail.Id); existing != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"album_id": existing.ID, "existed": true})
+		return
+	}
+
+	recordType := detail.Metadata["record_type"]
+	if recordType == "" {
+		recordType = "album"
+	}
+	album := &models.Album{
+		ArtistID:   artist.ID,
+		Title:      detail.Title,
+		Year:       intPtrOrNil(int(detail.Year)),
+		Provider:   providerName,
+		ProviderID: detail.Id,
+		CoverURL:   strPtrOrNil(detail.CoverUrl),
+		RecordType: recordType,
+		Status:     models.AlbumStatusWatched,
+	}
+	// A release link is keyed by the release id itself (like a split target)
+	// so it can coexist with the release-group's own album.
+	if relID := detail.Metadata["release_id"]; relID != "" {
+		album.ReleaseID = &relID
+	}
+	if err := s.queries.CreateAlbum(album); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save album")
+		return
+	}
+
+	added, _, _, _ := s.foldAlbumTracks(providerName, album.ID, album.Title, models.TrackStatusWanted, detail, false)
+
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		// Detached from the request: this work must outlive the response.
+		s.enrichAlbumCover(context.WithoutCancel(r.Context()), album.ID)
+	}()
+
+	slog.Info("release added manually", "artist", artist.Name, "album", album.Title, "mbid", mbid, "tracks", added)
+	s.activityLog.Record("release_add", "album", album.ID, fmt.Sprintf(
+		"Added %s to %s from a MusicBrainz link — %d track(s)", album.Title, artist.Name, added))
+
+	writeJSON(w, http.StatusCreated, map[string]any{"album_id": album.ID})
 }

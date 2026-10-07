@@ -63,6 +63,8 @@ export default function ArtistDetail() {
   const [showRelinkSearch, setShowRelinkSearch] = useState(false);
   const [relinkQuery, setRelinkQuery] = useState('');
   const [relinkProvider, setRelinkProvider] = useState('');
+  const [showAddRelease, setShowAddRelease] = useState(false);
+  const [addReleaseURL, setAddReleaseURL] = useState('');
   // After linking a local artist the reconcile runs in the background; poll the
   // artist so its discography fills in live instead of waiting for a reload.
   const [reconciling, setReconciling] = useState(false);
@@ -314,6 +316,20 @@ export default function ArtistDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  const addRelease = useMutation({
+    mutationFn: (url: string) => api.addArtistRelease(Number(id), url.trim()),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['artist', id] });
+      if (res.existed) {
+        toast('That release is already in your library', 'info');
+      } else {
+        toast('Release added', 'success');
+      }
+      navigate(`/album/${res.album_id}`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   if (isLoading) {
     return (
       <div className="animate-pulse">
@@ -389,6 +405,15 @@ export default function ArtistDetail() {
               </svg>
             </button>
           )}
+          <button
+            onClick={() => setShowAddRelease(!showAddRelease)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors"
+            title="Add a release by MusicBrainz link"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
           <button
             onClick={() => toggleRelinkSearch(artist.name)}
             className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors"
@@ -476,6 +501,31 @@ export default function ArtistDetail() {
           {relinkQuery && relinkResults && relinkResults.artists.length === 0 && (
             <p className="text-xs text-zinc-500 text-center py-2">No results</p>
           )}
+        </div>
+      )}
+
+      {showAddRelease && (
+        <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 animate-fade-in">
+          <p className="text-xs font-medium text-zinc-400 mb-2">Add a release by MusicBrainz link</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={addReleaseURL}
+              onChange={(e) => setAddReleaseURL(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && addReleaseURL.trim()) addRelease.mutate(addReleaseURL); }}
+              placeholder="https://musicbrainz.org/release/… or /release-group/…"
+              className="flex-1 bg-zinc-900 rounded-lg px-3 py-2 text-sm placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
+              autoFocus
+            />
+            <button
+              onClick={() => addRelease.mutate(addReleaseURL)}
+              disabled={!addReleaseURL.trim() || addRelease.isPending}
+              className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-700 text-zinc-200 active:bg-zinc-600 transition-colors disabled:opacity-50"
+            >
+              {addRelease.isPending ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-1.5">Paste a release or release-group link — added watched with all tracks wanted.</p>
         </div>
       )}
 

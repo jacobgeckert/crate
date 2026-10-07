@@ -189,20 +189,7 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 	var albums []*pb.AlbumSummary
 	for i, rg := range resp.ReleaseGroups {
 		year := parseYear(rg.FirstReleaseDate)
-		recordType := "album"
-		switch rg.PrimaryType {
-		case "Single":
-			recordType = "single"
-		case "EP":
-			recordType = "ep"
-		case "Compilation":
-			recordType = "compilation"
-		}
-		// Secondary types ("Album + Live", "Album + Compilation") re-sort the
-		// release into that section; Crate defaults them to ignored.
-		if len(rg.SecondaryTypes) > 0 {
-			recordType = normalizeSecondaryType(rg.SecondaryTypes[0])
-		}
+		recordType := recordTypeFor(rg.PrimaryType, rg.SecondaryTypes)
 		meta := map[string]string{
 			"release_date": rg.FirstReleaseDate,
 		}
@@ -221,6 +208,25 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 	}
 
 	return &pb.AlbumList{Albums: albums}, nil
+}
+
+// recordTypeFor maps a release-group's primary/secondary types to a crate
+// record_type. Secondary types ("Album + Live", "Album + Compilation")
+// re-sort the release into that section; Crate defaults them to ignored.
+func recordTypeFor(primary string, secondary []string) string {
+	recordType := "album"
+	switch primary {
+	case "Single":
+		recordType = "single"
+	case "EP":
+		recordType = "ep"
+	case "Compilation":
+		recordType = "compilation"
+	}
+	if len(secondary) > 0 {
+		recordType = normalizeSecondaryType(secondary[0])
+	}
+	return recordType
 }
 
 // normalizeSecondaryType maps a MusicBrainz secondary release-group type to a
@@ -350,7 +356,9 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 			ID    string `json:"id"`
 			Title string `json:"title"`
 		} `json:"releases"`
-		ArtistCredit []struct {
+		PrimaryType    string   `json:"primary-type"`
+		SecondaryTypes []string `json:"secondary-types"`
+		ArtistCredit   []struct {
 			Artist struct {
 				Name string `json:"name"`
 			} `json:"artist"`
@@ -386,7 +394,9 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 		}
 	}
 
-	meta := map[string]string{}
+	meta := map[string]string{
+		"record_type": recordTypeFor(rgResp.PrimaryType, rgResp.SecondaryTypes),
+	}
 	if editions := s.listEditions(ctx, rgResp.ID); len(editions) > 0 {
 		if b, err := json.Marshal(editions); err == nil {
 			meta["releases"] = string(b)
@@ -418,8 +428,10 @@ func (s *server) getRelease(ctx context.Context, id string) (*pb.AlbumDetail, er
 			} `json:"artist"`
 		} `json:"artist-credit"`
 		ReleaseGroup struct {
-			ID               string `json:"id"`
-			FirstReleaseDate string `json:"first-release-date"`
+			ID               string   `json:"id"`
+			FirstReleaseDate string   `json:"first-release-date"`
+			PrimaryType      string   `json:"primary-type"`
+			SecondaryTypes   []string `json:"secondary-types"`
 		} `json:"release-group"`
 	}
 
@@ -447,6 +459,7 @@ func (s *server) getRelease(ctx context.Context, id string) (*pb.AlbumDetail, er
 		Metadata: map[string]string{
 			"release_id":       relResp.ID,
 			"release_group_id": relResp.ReleaseGroup.ID,
+			"record_type":      recordTypeFor(relResp.ReleaseGroup.PrimaryType, relResp.ReleaseGroup.SecondaryTypes),
 		},
 	}, nil
 }

@@ -34,6 +34,8 @@ type testEnv struct {
 	queries     *db.Queries
 	activityLog *activity.Log
 	fakeSlskd   *fakeSlskdServer
+	providerMgr *provider.Manager
+	grpcAddr    string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -82,6 +84,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		queries:     queries,
 		activityLog: actLog,
 		fakeSlskd:   fakeSlskd,
+		providerMgr: providerMgr,
+		grpcAddr:    grpcAddr,
 	}
 }
 
@@ -232,6 +236,28 @@ func (f *fakeProvider) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb
 					Metadata: map[string]string{"recording_id": "rec-b1-inst"}},
 				{Id: "5001", Title: "Track B2 (instrumental)", TrackNumber: 2, DiscNumber: 1, DurationMs: 200000, Rank: 2,
 					Metadata: map[string]string{"recording_id": "rec-b2-inst"}},
+			},
+		}, nil
+	// MusicBrainz-id-shaped albums for the manual add-release flow — the
+	// handler only accepts UUID-shaped ids.
+	case "a1a1a1a1-0000-0000-0000-000000000001":
+		return &pb.AlbumDetail{
+			Id: "a1a1a1a1-0000-0000-0000-000000000001", Title: "Secret Gig", CoverUrl: "http://img/gig.jpg", Year: 2019, ArtistName: "Test Artist",
+			Tracks: []*pb.TrackInfo{
+				{Id: "6000", Title: "Gig Intro", TrackNumber: 1, DiscNumber: 1, DurationMs: 100000, Rank: 1},
+			},
+			Metadata: map[string]string{"record_type": "live"},
+		}, nil
+	case "a1a1a1a1-0000-0000-0000-000000000002":
+		return &pb.AlbumDetail{
+			Id: "a1a1a1a1-0000-0000-0000-000000000002", Title: "Secret Gig (acoustic)", CoverUrl: "http://img/giga.jpg", Year: 2019, ArtistName: "Test Artist",
+			Tracks: []*pb.TrackInfo{
+				{Id: "6001", Title: "Gig Intro (acoustic)", TrackNumber: 1, DiscNumber: 1, DurationMs: 110000, Rank: 1},
+			},
+			Metadata: map[string]string{
+				"release_id":       "a1a1a1a1-0000-0000-0000-000000000002",
+				"release_group_id": "a1a1a1a1-0000-0000-0000-000000000001",
+				"record_type":      "live",
 			},
 		}, nil
 	}
@@ -1122,6 +1148,85 @@ func TestRefreshRevertsMissingFiles(t *testing.T) {
 	got2, _ := env.queries.GetTrack(a2.ID)
 	if got2.Status != models.TrackStatusWanted {
 		t.Errorf("Track A2 status = %s, want wanted (file deleted)", got2.Status)
+	}
+}
+
+// TestAddArtistRelease: pasting a MusicBrainz link on an artist page creates
+// the release under that artist — group links as normal albums, release links
+// release-keyed so they coexist with the group's own album.
+func TestAddArtistRelease(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	if err := env.providerMgr.RegisterProvider(context.Background(), "musicbrainz", env.grpcAddr); err != nil {
+		t.Fatalf("register musicbrainz: %v", err)
+	}
+
+	artists, _ := env.queries.ListArtists()
+	artistID := artists[0].ID
+
+	// Release-group link → normal album, provider record_type honored.
+	w := env.do("POST", fmt.Sprintf("/api/artists/%d/releases", artistID),
+		`{"url":"https://musicbrainz.org/release-group/a1a1a1a1-0000-0000-0000-000000000001"}`)
+	if w.Code != 201 {
+		t.Fatalf("add release-group: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	res := decode[struct {
+		AlbumID int64 `json:"album_id"`
+		Existed bool  `json:"existed"`
+	}](t, w)
+	album, err := env.queries.GetAlbum(res.AlbumID)
+	if err != nil {
+		t.Fatalf("get album: %v", err)
+	}
+	if album.Provider != "musicbrainz" || album.ProviderID != "a1a1a1a1-0000-0000-0000-000000000001" {
+		t.Errorf("album provider = %s/%s, want musicbrainz/<mbid>", album.Provider, album.ProviderID)
+	}
+	if album.RecordType != "live" || album.Status != models.AlbumStatusWatched || album.ReleaseID != nil {
+		t.Errorf("album = type:%s status:%s release:%v, want live/watched/nil", album.RecordType, album.Status, album.ReleaseID)
+	}
+	tracks, _ := env.queries.ListTracksByAlbum(album.ID)
+	if len(tracks) != 1 || tracks[0].Status != models.TrackStatusWanted {
+		t.Errorf("tracks = %+v, want one wanted track", tracks)
+	}
+
+	// Release link → release-keyed album (coexists with the group album).
+	w = env.do("POST", fmt.Sprintf("/api/artists/%d/releases", artistID),
+		`{"url":"https://musicbrainz.org/release/a1a1a1a1-0000-0000-0000-000000000002"}`)
+	if w.Code != 201 {
+		t.Fatalf("add release: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	res = decode[struct {
+		AlbumID int64 `json:"album_id"`
+		Existed bool  `json:"existed"`
+	}](t, w)
+	relAlbum, _ := env.queries.GetAlbum(res.AlbumID)
+	if relAlbum.ReleaseID == nil || *relAlbum.ReleaseID != "a1a1a1a1-0000-0000-0000-000000000002" {
+		t.Errorf("release album release_id = %v, want the release mbid", relAlbum.ReleaseID)
+	}
+
+	// Same link again → idempotent, points at the existing album.
+	w = env.do("POST", fmt.Sprintf("/api/artists/%d/releases", artistID),
+		`{"url":"https://musicbrainz.org/release-group/a1a1a1a1-0000-0000-0000-000000000001"}`)
+	if w.Code != 200 {
+		t.Fatalf("re-add: expected 200, got %d", w.Code)
+	}
+	res = decode[struct {
+		AlbumID int64 `json:"album_id"`
+		Existed bool  `json:"existed"`
+	}](t, w)
+	if !res.Existed || res.AlbumID != album.ID {
+		t.Errorf("re-add = %+v, want existed=true album_id=%d", res, album.ID)
+	}
+
+	// Bad links are rejected.
+	for _, bad := range []string{
+		`{"url":"https://bandcamp.com/release/abc"}`,
+		`{"url":"https://musicbrainz.org/artist/a1a1a1a1-0000-0000-0000-000000000001"}`,
+		`{"url":"not a link"}`,
+	} {
+		if w := env.do("POST", fmt.Sprintf("/api/artists/%d/releases", artistID), bad); w.Code != 400 {
+			t.Errorf("bad link %s: expected 400, got %d", bad, w.Code)
+		}
 	}
 }
 
@@ -2818,6 +2923,8 @@ func newTestEnvWithLibrary(t *testing.T, libraryDir string) *testEnv {
 		queries:     queries,
 		activityLog: actLog,
 		fakeSlskd:   fakeSlskd,
+		providerMgr: providerMgr,
+		grpcAddr:    grpcAddr,
 	}
 }
 

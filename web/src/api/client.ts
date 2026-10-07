@@ -77,6 +77,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ types }),
     }),
+  addArtistRelease: (id: number, url: string) =>
+    request<{ album_id: number; existed?: boolean }>(`/artists/${id}/releases`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
   getUpcomingReleases: () => request<Album[]>('/releases/upcoming'),
   refreshArtists: (ids: number[]) =>
     request<{ queued: number }>(`/artists/refresh`, { method: 'POST', body: JSON.stringify({ ids }) }),
