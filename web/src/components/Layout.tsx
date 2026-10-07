@@ -32,6 +32,14 @@ function IconUpload({ className }: { className?: string }) {
   );
 }
 
+function IconActivity({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 8v4l3 3" /><circle cx="12" cy="12" r="10" />
+    </svg>
+  );
+}
+
 function IconCalendar({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -53,6 +61,7 @@ const navItems = [
   { to: '/', label: 'Library', Icon: IconLibrary },
   { to: '/search', label: 'Search', Icon: IconSearch },
   { to: '/downloads', label: 'Downloads', Icon: IconDownload },
+  { to: '/activity', label: 'Activity', Icon: IconActivity },
   { to: '/upcoming', label: 'Upcoming', Icon: IconCalendar },
   { to: '/upload', label: 'Upload', Icon: IconUpload },
   { to: '/settings', label: 'Settings', Icon: IconSettings },

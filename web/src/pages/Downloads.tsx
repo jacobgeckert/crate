@@ -1,12 +1,10 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { formatSpeed } from '../lib/format';
 import DetailSheet, { DetailRow } from '../components/DetailSheet';
-import type { DownloadQueueItem, DownloadProgress, ActivityLog } from '../types/index';
-
-const ACTIVITY_PAGE_SIZE = 50;
+import type { DownloadQueueItem, DownloadProgress } from '../types/index';
 
 const STATUS_ORDER = ['downloading', 'organizing', 'searching', 'pending', 'failed', 'complete'];
 const STATUS_STYLES: Record<string, string> = {
@@ -58,7 +56,6 @@ function groupByAlbum(downloads: DownloadQueueItem[]): AlbumGroup[] {
 export default function Downloads() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'queue' | 'activity'>('queue');
   const [selected, setSelected] = useState<DownloadQueueItem | null>(null);
 
   const { data: downloads, isLoading } = useQuery({
@@ -89,32 +86,6 @@ export default function Downloads() {
   const groups = useMemo(() => groupByAlbum(downloads ?? []), [downloads]);
   const failedTotal = downloads?.filter((d) => d.status === 'failed').length ?? 0;
   const completeTotal = downloads?.filter((d) => d.status === 'complete').length ?? 0;
-
-  const [extraActivity, setExtraActivity] = useState<ActivityLog[]>([]);
-  const [activityOffset, setActivityOffset] = useState(ACTIVITY_PAGE_SIZE);
-  const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
-
-  const { data: activityData } = useQuery({
-    queryKey: ['activity'],
-    queryFn: () => api.listActivity(ACTIVITY_PAGE_SIZE, 0),
-    enabled: tab === 'activity',
-    refetchInterval: 10_000,
-  });
-
-  const activityItems = [...(activityData?.items || []), ...extraActivity];
-  const activityTotal = activityData?.total ?? 0;
-
-  const loadMoreActivity = useCallback(async () => {
-    if (loadingMoreActivity || activityOffset >= activityTotal) return;
-    setLoadingMoreActivity(true);
-    try {
-      const data = await api.listActivity(ACTIVITY_PAGE_SIZE, activityOffset);
-      setExtraActivity((prev) => [...prev, ...(data.items || [])]);
-      setActivityOffset((prev) => prev + ACTIVITY_PAGE_SIZE);
-    } finally {
-      setLoadingMoreActivity(false);
-    }
-  }, [activityOffset, activityTotal, loadingMoreActivity]);
 
   const queue = useMutation({
     mutationFn: api.queueDownloads,
@@ -151,29 +122,8 @@ export default function Downloads() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold">Downloads</h2>
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold">Downloads</h2>
-          <div className="flex bg-zinc-800 rounded-lg p-0.5">
-            <button
-              onClick={() => setTab('queue')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                tab === 'queue' ? 'bg-zinc-700 text-white' : 'text-zinc-400'
-              }`}
-            >
-              Queue
-            </button>
-            <button
-              onClick={() => setTab('activity')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                tab === 'activity' ? 'bg-zinc-700 text-white' : 'text-zinc-400'
-              }`}
-            >
-              Activity
-            </button>
-          </div>
-        </div>
-        {tab === 'queue' && (
-          <div className="flex items-center gap-3">
             {failedTotal > 0 && (
               <button
                 onClick={() => clearByStatus.mutate('failed')}
@@ -197,12 +147,10 @@ export default function Downloads() {
             >
               {queue.isPending ? 'Queuing...' : queue.data ? `Queued ${queue.data.queued}` : 'Queue All Wanted'}
             </button>
-          </div>
-        )}
+        </div>
       </div>
 
-      {tab === 'queue' && (
-        <>
+      <>
           {isLoading && (
             <div className="space-y-1">
               {[...Array(3)].map((_, i) => (
@@ -236,18 +184,7 @@ export default function Downloads() {
               />
             ))}
           </div>
-        </>
-      )}
-
-      {tab === 'activity' && (
-        <ActivityList
-          activity={activityItems}
-          total={activityTotal}
-          offset={activityOffset}
-          loadingMore={loadingMoreActivity}
-          onLoadMore={loadMoreActivity}
-        />
-      )}
+      </>
 
       <DetailSheet
         open={!!selected}
@@ -276,57 +213,6 @@ export default function Downloads() {
   );
 }
 
-function ActivityList({ activity, total, offset, loadingMore, onLoadMore }: {
-  activity: ActivityLog[];
-  total: number;
-  offset: number;
-  loadingMore: boolean;
-  onLoadMore: () => void;
-}) {
-  if (!activity.length) {
-    return (
-      <div className="text-center py-16">
-        <svg className="w-12 h-12 mx-auto text-zinc-700 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 8v4l3 3" /><circle cx="12" cy="12" r="10" />
-        </svg>
-        <p className="text-zinc-500">No activity yet</p>
-      </div>
-    );
-  }
-
-  const actionIcons: Record<string, string> = {
-    search_started: 'text-blue-400',
-    download_started: 'text-blue-400',
-    download_complete: 'text-green-400',
-    download_failed: 'text-red-400',
-    file_missing: 'text-amber-400',
-  };
-
-  return (
-    <div className="space-y-0.5">
-      {activity.map((a) => (
-        <div key={a.id} className="flex items-start gap-2.5 px-2.5 py-2 rounded-lg">
-          <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${actionIcons[a.action] ? actionIcons[a.action].replace('text-', 'bg-') : 'bg-zinc-600'}`} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm truncate">{a.details}</p>
-            <p className="text-[10px] text-zinc-600">
-              {new Date(a.created_at).toLocaleString()}
-            </p>
-          </div>
-        </div>
-      ))}
-      {offset < total && (
-        <button
-          onClick={onLoadMore}
-          disabled={loadingMore}
-          className="w-full py-2.5 text-sm text-zinc-400 bg-zinc-800/40 rounded-lg active:bg-zinc-800 transition-colors disabled:opacity-50 mt-2"
-        >
-          {loadingMore ? 'Loading...' : `Load More (${activity.length} of ${total})`}
-        </button>
-      )}
-    </div>
-  );
-}
 
 function AlbumCover({ url }: { url?: string }) {
   const [failed, setFailed] = useState(false);
