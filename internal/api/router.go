@@ -18,6 +18,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/organizer"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/upload"
 )
@@ -31,6 +32,7 @@ type Server struct {
 	importer    *importer.Service
 	reject      *reject.Service
 	uploads     *upload.Service
+	organizer   *organizer.Service
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
@@ -45,7 +47,7 @@ type Server struct {
 	version    string
 }
 
-func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service) *Server {
+func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service, org *organizer.Service) *Server {
 	s := &Server{
 		queries:     queries,
 		providers:   providers,
@@ -55,6 +57,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		importer:    importer.NewService(queries, libraryDir, actLog),
 		reject:      reject.NewService(queries, libraryDir, actLog),
 		uploads:     up,
+		organizer:   org,
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,

@@ -159,7 +159,10 @@ export default function AlbumDetail() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['album'] });
       queryClient.invalidateQueries({ queryKey: ['artist'] });
-      toast(`Tracks split into a separate album — ${res.moved} moved, ${res.added} added`, 'success');
+      toast(
+        `Tracks split into a separate album — ${res.moved} moved, ${res.relocated} file(s) relocated, ${res.added} added`,
+        'success',
+      );
       navigate(`/album/${res.album_id}`);
     },
     onError: (err: Error) => toast(err.message, 'error'),

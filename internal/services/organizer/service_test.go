@@ -112,6 +112,58 @@ func TestOrganizeInvalidStoredTemplateFallsBack(t *testing.T) {
 	env.assertLibraryFile(t, "Radiohead/OK Computer (1997)/06 - Karma Police.flac")
 }
 
+func TestRelocateMovesLibraryFile(t *testing.T) {
+	env := newOrgEnv(t, intPtr(1997))
+	env.mustOrganize(t)
+	stored, err := env.queries.GetTrack(env.track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.track.FilePath = stored.FilePath
+
+	// A second album — e.g. an instrumental edition the track was split onto.
+	src, err := env.queries.GetAlbum(env.track.AlbumID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := &models.Album{ArtistID: src.ArtistID, Title: "OK Computer (Instrumentals)", Year: intPtr(1997), Provider: "test", ProviderID: "al2", RecordType: "album", Status: models.AlbumStatusWatched}
+	if err := env.queries.CreateAlbum(other); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.queries.UpdateTrackAlbum(env.track.ID, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	env.track.AlbumID = other.ID
+
+	if err := env.svc.Relocate(env.track); err != nil {
+		t.Fatalf("Relocate: %v", err)
+	}
+	env.assertLibraryFile(t, "Radiohead/OK Computer (Instrumentals) (1997)/06 - Karma Police.flac")
+	oldPath := filepath.Join(env.library, "Radiohead", "OK Computer (1997)")
+	if _, err := os.Stat(filepath.Join(oldPath, "06 - Karma Police.flac")); !os.IsNotExist(err) {
+		t.Errorf("source file not removed: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("emptied album dir not pruned: %v", err)
+	}
+}
+
+func TestRelocateSkipsExternalFile(t *testing.T) {
+	env := newOrgEnv(t, intPtr(1997))
+	ext := t.TempDir()
+	abs := filepath.Join(ext, "song.flac")
+	if err := os.WriteFile(abs, []byte("audio"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env.track.FilePath = &abs
+	if err := env.svc.Relocate(env.track); err != nil {
+		t.Fatalf("Relocate on external file should be a no-op: %v", err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		t.Errorf("external file was touched: %v", err)
+	}
+}
+
 func TestOrganizeUpgradeRemovesReplacedFile(t *testing.T) {
 	env := newOrgEnv(t, intPtr(1997))
 

@@ -71,7 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 	upSvc := upload.NewService(queries, providerMgr, cfg.UploadDir, cfg.LibraryPath, actLog, dl)
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version, upSvc)
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version, upSvc, org)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

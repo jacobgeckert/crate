@@ -634,6 +634,16 @@ func (q *Queries) UpdateTrackAlbum(id, albumID int64) error {
 	return err
 }
 
+// UpdateTrackListing rewrites a row's display metadata to match a release's
+// tracklist entry — used when a split moves a row onto another edition so
+// the title/numbering reflect that release rather than the old one.
+func (q *Queries) UpdateTrackListing(id int64, title string, trackNumber, discNumber int) error {
+	_, err := q.db.Exec(
+		`UPDATE tracks SET title = ?, track_number = ?, disc_number = ?, updated_at = ? WHERE id = ?`,
+		title, trackNumber, discNumber, now(), id)
+	return err
+}
+
 func (q *Queries) UpdateTrackDownloadedFilename(id int64, filename string) error {
 	_, err := q.db.Exec(`UPDATE tracks SET downloaded_filename = ?, updated_at = ? WHERE id = ?`,
 		filename, now(), id)

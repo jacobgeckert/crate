@@ -104,7 +104,7 @@ export const api = {
       body: JSON.stringify({ release_id: releaseId }),
     }),
   splitAlbumTracks: (id: number, releaseId: string, trackIds: number[]) =>
-    request<{ album_id: number; moved: number; added: number }>(`/albums/${id}/split-tracks`, {
+    request<{ album_id: number; moved: number; relocated: number; added: number }>(`/albums/${id}/split-tracks`, {
       method: 'POST',
       body: JSON.stringify({ release_id: releaseId, track_ids: trackIds }),
     }),

@@ -37,42 +37,13 @@ func (s *Service) Organize(track *models.Track) error {
 		return fmt.Errorf("organizer: %w", err)
 	}
 
-	album, err := s.queries.GetAlbum(track.AlbumID)
+	meta, artist, album, err := s.trackMeta(track)
 	if err != nil {
 		return err
 	}
-	artist, err := s.queries.GetArtist(album.ArtistID)
+	rel, err := s.renderPath(meta)
 	if err != nil {
 		return err
-	}
-
-	year := 0
-	if album.Year != nil {
-		year = *album.Year
-	}
-	meta := naming.Meta{
-		Artist: artist.Name,
-		Album:  album.Title,
-		Year:   year,
-		Track:  track.TrackNumber,
-		Disc:   track.DiscNumber,
-		Title:  track.Title,
-	}
-
-	tmpl := naming.DefaultTemplate
-	if v, err := s.queries.GetSetting(naming.SettingKey); err == nil && strings.TrimSpace(v) != "" {
-		tmpl = v
-	}
-	rel, err := naming.Render(tmpl, meta)
-	if err != nil && tmpl != naming.DefaultTemplate {
-		// The API validates templates on save, so this only happens if the
-		// stored value was edited by hand or the data hits an empty-segment
-		// case. Fall back loudly rather than blocking downloads forever.
-		slog.Error("organizer: naming template failed, using default layout", "template", tmpl, "error", err)
-		rel, err = naming.Render(naming.DefaultTemplate, meta)
-	}
-	if err != nil {
-		return fmt.Errorf("organizer: render path: %w", err)
 	}
 
 	dest := filepath.Join(s.libraryDir, rel) + filepath.Ext(src)
@@ -97,7 +68,121 @@ func (s *Service) Organize(track *models.Track) error {
 	slog.Info("organizer: moved", "dest", dest)
 	s.removeReplacedFile(oldAbs, dest)
 	s.cleanDownloadedDir(filepath.Dir(src))
+	s.tagFile(dest, track, artist, album, *meta)
 
+	relPath, err := filepath.Rel(s.libraryDir, dest)
+	if err != nil {
+		return fmt.Errorf("organizer: relative path: %w", err)
+	}
+	return s.queries.UpdateTrackFilePath(track.ID, relPath)
+}
+
+// Relocate moves an owned library file to the path the naming template yields
+// for the track's *current* album — used when a track is split into another
+// edition so the bytes follow the row. Files outside the library are left
+// alone; their path stays valid and nothing is renamed.
+func (s *Service) Relocate(track *models.Track) error {
+	if track.FilePath == nil || *track.FilePath == "" {
+		return nil
+	}
+	src := library.ResolvePath(s.libraryDir, *track.FilePath)
+	if !library.Contains(s.libraryDir, src) {
+		return nil
+	}
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("organizer: source file missing: %w", err)
+	}
+
+	meta, artist, album, err := s.trackMeta(track)
+	if err != nil {
+		return err
+	}
+	rel, err := s.renderPath(meta)
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(s.libraryDir, rel) + filepath.Ext(src)
+	if dest == src {
+		// Path already correct — retag for the new album identity and finish.
+		s.tagFile(src, track, artist, album, *meta)
+		return nil
+	}
+	if _, err := os.Stat(dest); err == nil {
+		return fmt.Errorf("organizer: destination already exists: %s", dest)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dest); err != nil {
+		if err2 := copyFile(src, dest); err2 != nil {
+			return err2
+		}
+		os.Remove(src)
+	}
+	slog.Info("organizer: relocated", "src", src, "dest", dest)
+	pruneEmptyDirs(filepath.Dir(src), s.libraryDir)
+	s.tagFile(dest, track, artist, album, *meta)
+
+	relPath, err := filepath.Rel(s.libraryDir, dest)
+	if err != nil {
+		return fmt.Errorf("organizer: relative path: %w", err)
+	}
+	if err := s.queries.UpdateTrackFilePath(track.ID, relPath); err != nil {
+		return err
+	}
+	track.FilePath = &relPath
+	return nil
+}
+
+// trackMeta resolves the track's album + artist and builds the naming
+// template metadata. The returned Meta's Year mirrors album.Year (0 when nil).
+func (s *Service) trackMeta(track *models.Track) (*naming.Meta, *models.Artist, *models.Album, error) {
+	album, err := s.queries.GetAlbum(track.AlbumID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	artist, err := s.queries.GetArtist(album.ArtistID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	year := 0
+	if album.Year != nil {
+		year = *album.Year
+	}
+	return &naming.Meta{
+		Artist: artist.Name,
+		Album:  album.Title,
+		Year:   year,
+		Track:  track.TrackNumber,
+		Disc:   track.DiscNumber,
+		Title:  track.Title,
+	}, artist, album, nil
+}
+
+// renderPath renders the configured naming template for the given metadata,
+// falling back to the default layout on a bad stored template.
+func (s *Service) renderPath(meta *naming.Meta) (string, error) {
+	tmpl := naming.DefaultTemplate
+	if v, err := s.queries.GetSetting(naming.SettingKey); err == nil && strings.TrimSpace(v) != "" {
+		tmpl = v
+	}
+	rel, err := naming.Render(tmpl, *meta)
+	if err != nil && tmpl != naming.DefaultTemplate {
+		// The API validates templates on save, so this only happens if the
+		// stored value was edited by hand or the data hits an empty-segment
+		// case. Fall back loudly rather than blocking downloads forever.
+		slog.Error("organizer: naming template failed, using default layout", "template", tmpl, "error", err)
+		rel, err = naming.Render(naming.DefaultTemplate, *meta)
+	}
+	if err != nil {
+		return "", fmt.Errorf("organizer: render path: %w", err)
+	}
+	return rel, nil
+}
+
+// tagFile stamps Crate's fields onto a library file — non-destructive to
+// foreign tags, and failures are warned rather than fatal.
+func (s *Service) tagFile(dest string, track *models.Track, artist *models.Artist, album *models.Album, meta naming.Meta) {
 	coverURL := ""
 	if album.CoverURL != nil {
 		coverURL = *album.CoverURL
@@ -108,7 +193,7 @@ func (s *Service) Organize(track *models.Track) error {
 		Album:       album.Title,
 		TrackNumber: track.TrackNumber,
 		DiscNumber:  track.DiscNumber,
-		Year:        year,
+		Year:        meta.Year,
 		CoverURL:    coverURL,
 	}
 	// Stamp MusicBrainz identity when the entity is anchored to it — makes the
@@ -120,7 +205,14 @@ func (s *Service) Organize(track *models.Track) error {
 		}
 	}
 	if album.Provider == "musicbrainz" {
-		tagMeta.MBReleaseGroupID = album.ProviderID
+		if album.ReleaseID != nil && *album.ReleaseID != "" {
+			tagMeta.MBReleaseID = *album.ReleaseID
+		}
+		// ProviderID is a release-group id — except on release-keyed (split)
+		// albums, where it holds the release id itself.
+		if album.ReleaseID == nil || *album.ReleaseID != album.ProviderID {
+			tagMeta.MBReleaseGroupID = album.ProviderID
+		}
 	}
 	if artist.Provider == "musicbrainz" {
 		tagMeta.MBAlbumArtistID = artist.ProviderID
@@ -129,12 +221,6 @@ func (s *Service) Organize(track *models.Track) error {
 	if err := tagger.Tag(dest, tagMeta); err != nil {
 		slog.Warn("organizer: tagging failed", "dest", dest, "error", err)
 	}
-
-	relPath, err := filepath.Rel(s.libraryDir, dest)
-	if err != nil {
-		return fmt.Errorf("organizer: relative path: %w", err)
-	}
-	return s.queries.UpdateTrackFilePath(track.ID, relPath)
 }
 
 // DownloadedFileExists reports whether a file matching the remote path's

@@ -306,25 +306,47 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 	for _, tid := range req.TrackIDs {
 		want[tid] = true
 	}
-	moved := 0
+	moved, relocated := 0, 0
 	for i := range tracks {
 		t := &tracks[i]
 		if !want[t.ID] {
 			continue
 		}
-		if pt := matchProviderTrack(t, detail.Tracks); pt != nil &&
-			(t.Provider != album.Provider || t.ProviderID != pt.Id) {
-			if err := s.queries.RelinkTrack(t.ID, album.Provider, pt.Id); err != nil {
-				slog.Error("split: relink track failed", "album", target.Title, "track", t.Title, "error", err)
-			} else if recID := pt.Metadata["recording_id"]; recID != "" {
+		if pt := matchProviderTrack(t, detail.Tracks); pt != nil {
+			if t.Provider != album.Provider || t.ProviderID != pt.Id {
+				if err := s.queries.RelinkTrack(t.ID, album.Provider, pt.Id); err != nil {
+					slog.Error("split: relink track failed", "album", target.Title, "track", t.Title, "error", err)
+				}
+			}
+			// Adopt the release's listing so the row — and the file naming
+			// below — matches the edition it now lives on.
+			if err := s.queries.UpdateTrackListing(t.ID, pt.Title, int(pt.TrackNumber), int(pt.DiscNumber)); err != nil {
+				slog.Error("split: relist track failed", "album", target.Title, "track", t.Title, "error", err)
+			}
+			if recID := pt.Metadata["recording_id"]; recID != "" {
 				_ = s.queries.SetTrackMBRecordingID(t.ID, recID)
 			}
+			t.Title = pt.Title
+			t.TrackNumber = int(pt.TrackNumber)
+			t.DiscNumber = int(pt.DiscNumber)
+			t.Provider = album.Provider
+			t.ProviderID = pt.Id
 		}
 		if err := s.queries.UpdateTrackAlbum(t.ID, target.ID); err != nil {
 			slog.Error("split: move track failed", "album", target.Title, "track", t.Title, "error", err)
-		} else {
-			moved++
+			continue
 		}
+		t.AlbumID = target.ID
+		// The bytes follow the row: re-home the file under the target album
+		// via the naming template and retag its album identity.
+		if t.FilePath != nil && *t.FilePath != "" && s.organizer != nil {
+			if err := s.organizer.Relocate(t); err != nil {
+				slog.Warn("split: file relocation failed", "track", t.Title, "error", err)
+			} else {
+				relocated++
+			}
+		}
+		moved++
 	}
 
 	// Fill out the rest of the release tracklist so the target album is a
@@ -337,14 +359,15 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 	s.enrichAlbumCover(ctx, target.ID)
 
 	slog.Info("split: moved tracks to release album", "album", album.Title, "release_id", req.ReleaseID,
-		"target", target.ID, "moved", moved, "added", added)
+		"target", target.ID, "moved", moved, "relocated", relocated, "added", added)
 	s.activityLog.Record("album_split", "album", target.ID, fmt.Sprintf(
-		"Split %d track(s) from %s into %s — %d added", moved, album.Title, target.Title, added))
+		"Split %d track(s) from %s into %s — %d file(s) relocated, %d added", moved, album.Title, target.Title, relocated, added))
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"album_id": target.ID,
-		"moved":    moved,
-		"added":    added,
+		"album_id":  target.ID,
+		"moved":     moved,
+		"relocated": relocated,
+		"added":     added,
 	})
 }
 

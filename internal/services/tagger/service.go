@@ -27,6 +27,7 @@ type TrackMeta struct {
 	// release the provider tracklist came from.
 	MBRecordingID    string
 	MBTrackID        string // release-track id
+	MBReleaseID      string // specific release (edition) id
 	MBReleaseGroupID string
 	MBArtistID       string
 	MBAlbumArtistID  string
@@ -190,6 +191,9 @@ func flacMBFields(meta TrackMeta) map[string]string {
 	if meta.MBTrackID != "" {
 		m["MUSICBRAINZ_RELEASETRACKID"] = meta.MBTrackID
 	}
+	if meta.MBReleaseID != "" {
+		m["MUSICBRAINZ_ALBUMID"] = meta.MBReleaseID
+	}
 	if meta.MBReleaseGroupID != "" {
 		m["MUSICBRAINZ_RELEASEGROUPID"] = meta.MBReleaseGroupID
 	}
@@ -211,6 +215,9 @@ func tagMB3(tag *id3v2.Tag, meta TrackMeta) {
 	txxx := map[string]string{}
 	if meta.MBTrackID != "" {
 		txxx["MusicBrainz Release Track Id"] = meta.MBTrackID
+	}
+	if meta.MBReleaseID != "" {
+		txxx["MusicBrainz Album Id"] = meta.MBReleaseID
 	}
 	if meta.MBReleaseGroupID != "" {
 		txxx["MusicBrainz Release Group Id"] = meta.MBReleaseGroupID
