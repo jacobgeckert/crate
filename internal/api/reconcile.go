@@ -529,11 +529,17 @@ var caaClient = &http.Client{Timeout: 8 * time.Second}
 // coverArtExists HEADs a Cover Art Archive URL; CAA 307s to archive.org when
 // art exists and 404s when the release/group has no submitted art.
 func coverArtExists(ctx context.Context, url string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	// Only ever CAA — the URL is built from a fixed host plus a provider
+	// release/group id, never raw user input. Guard anyway: a compromised
+	// or buggy provider must not turn this into an arbitrary fetcher.
+	if !strings.HasPrefix(url, "https://coverartarchive.org/") {
+		return false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil) // #nosec G704 -- host pinned above
 	if err != nil {
 		return false
 	}
-	resp, err := caaClient.Do(req)
+	resp, err := caaClient.Do(req) // #nosec G704 -- host pinned above
 	if err != nil {
 		return false
 	}

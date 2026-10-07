@@ -272,7 +272,8 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 		s.bgWork.Add(1)
 		go func() {
 			defer s.bgWork.Done()
-			s.enrichArtistImage(context.Background(), existing.ID)
+			// Detached from the request: this work must outlive the response.
+			s.enrichArtistImage(context.WithoutCancel(r.Context()), existing.ID)
 			s.saveAlbumsFromProvider(primary, existing.ID, albums)
 		}()
 
@@ -302,7 +303,8 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
-		s.enrichArtistImage(context.Background(), artist.ID)
+		// Detached from the request: this work must outlive the response.
+		s.enrichArtistImage(context.WithoutCancel(r.Context()), artist.ID)
 		s.saveAlbumsFromProvider(primary, artist.ID, albums)
 	}()
 
@@ -522,7 +524,8 @@ func (s *Server) handleWatchAlbum(w http.ResponseWriter, r *http.Request) {
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
-		s.enrichAlbumCover(context.Background(), album.ID)
+		// Detached from the request: this work must outlive the response.
+		s.enrichAlbumCover(context.WithoutCancel(r.Context()), album.ID)
 	}()
 
 	writeJSON(w, http.StatusCreated, album)
