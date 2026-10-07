@@ -222,6 +222,18 @@ func (f *fakeProvider) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb
 					Metadata: map[string]string{"recording_id": "rec-b2"}},
 			},
 		}, nil
+	// An instrumental edition of Album Two — distinct recordings, so it is a
+	// different musical release, not just another pressing.
+	case "rel-2001-inst":
+		return &pb.AlbumDetail{
+			Id: "rel-2001-inst", Title: "Album Two (instrumental)", CoverUrl: "http://img/a2i.jpg", Year: 2024, ArtistName: "Test Artist",
+			Tracks: []*pb.TrackInfo{
+				{Id: "5000", Title: "Track B1 (instrumental)", TrackNumber: 1, DiscNumber: 1, DurationMs: 240000, Rank: 1,
+					Metadata: map[string]string{"recording_id": "rec-b1-inst"}},
+				{Id: "5001", Title: "Track B2 (instrumental)", TrackNumber: 2, DiscNumber: 1, DurationMs: 200000, Rank: 2,
+					Metadata: map[string]string{"recording_id": "rec-b2-inst"}},
+			},
+		}, nil
 	}
 	return nil, fmt.Errorf("album not found")
 }
@@ -929,6 +941,89 @@ func TestSetAlbumEditionReFoldsTracks(t *testing.T) {
 	b2 := trackByTitle(t, tracks, "Track B2")
 	if b2.ProviderID != "4004" || b2.Status != models.TrackStatusIgnored {
 		t.Errorf("Track B2 = %s/%s %s, want test/4004 ignored (album is ignored)", b2.Provider, b2.ProviderID, b2.Status)
+	}
+}
+
+// TestSplitAlbumEdition: splitting an edition into its own album moves the
+// matching track rows (provider-id, recording-id, title-fold order) while the
+// source album keeps the rows that belong to its own edition.
+func TestSplitAlbumEdition(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	var two *models.Album
+	for i := range albums {
+		if albums[i].ProviderID == "2001" {
+			two = &albums[i]
+		}
+	}
+	if two == nil {
+		t.Fatal("Album Two not found")
+	}
+
+	// The instrumental edition's files got folded into the standard album —
+	// owned rows keyed by the instrumental release's track ids.
+	inst1 := models.Track{
+		AlbumID: two.ID, Title: "Track B1 (instrumental)", TrackNumber: 1, DiscNumber: 1,
+		Provider: "test", ProviderID: "5000",
+		MBRecordingID: strp("rec-b1-inst"), Status: models.TrackStatusOwned,
+	}
+	env.queries.CreateTrack(&inst1)
+	env.queries.UpdateTrackFilePath(inst1.ID, "Album Two/01-inst.flac")
+	inst2 := models.Track{
+		AlbumID: two.ID, Title: "Track B2 (instrumental)", TrackNumber: 2, DiscNumber: 1,
+		Provider: "test", ProviderID: "5001",
+		MBRecordingID: strp("rec-b2-inst"), Status: models.TrackStatusOwned,
+	}
+	env.queries.CreateTrack(&inst2)
+	env.queries.UpdateTrackFilePath(inst2.ID, "Album Two/02-inst.flac")
+
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/split-edition", two.ID), `{"release_id": "rel-2001-inst"}`)
+	if w.Code != 200 {
+		t.Fatalf("split edition: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	res := decode[struct {
+		AlbumID int64 `json:"album_id"`
+		Moved   int   `json:"moved"`
+		Added   int   `json:"added"`
+	}](t, w)
+	if res.Moved != 2 || res.Added != 0 {
+		t.Errorf("split result = %+v, want moved=2 added=0", res)
+	}
+
+	// New album is keyed by the release id, keeps the edition title + files.
+	split, err := env.queries.GetAlbum(res.AlbumID)
+	if err != nil {
+		t.Fatalf("split album: %v", err)
+	}
+	if split.ProviderID != "rel-2001-inst" || split.ReleaseID == nil || *split.ReleaseID != "rel-2001-inst" {
+		t.Errorf("split album provider=%s release=%v, want rel-2001-inst", split.ProviderID, split.ReleaseID)
+	}
+	if split.Title != "Album Two (instrumental)" {
+		t.Errorf("split title = %q, want 'Album Two (instrumental)'", split.Title)
+	}
+	splitTracks, _ := env.queries.ListTracksByAlbum(split.ID)
+	if len(splitTracks) != 2 {
+		t.Fatalf("split album tracks = %d, want 2", len(splitTracks))
+	}
+	for _, tr := range splitTracks {
+		if tr.Status != models.TrackStatusOwned || tr.FilePath == nil {
+			t.Errorf("moved track %s lost owned/file state", tr.Title)
+		}
+	}
+
+	// Source album keeps only the standard-edition rows.
+	srcTracks, _ := env.queries.ListTracksByAlbum(two.ID)
+	if len(srcTracks) != 1 || srcTracks[0].Title != "Track B1" {
+		t.Fatalf("source album tracks = %+v, want just Track B1", srcTracks)
+	}
+
+	// Splitting the same release again conflicts — the album now exists.
+	w = env.do("POST", fmt.Sprintf("/api/albums/%d/split-edition", two.ID), `{"release_id": "rel-2001-inst"}`)
+	if w.Code != 409 {
+		t.Errorf("re-split: expected 409, got %d", w.Code)
 	}
 }
 

@@ -267,7 +267,12 @@ func (s *Service) readMeta(path string) *string {
 // the library doesn't have yet (proposed for creation at commit).
 func (s *Service) matchFile(ctx context.Context, fm *importer.FileMeta) *Match {
 	var album *models.Album
-	if fm.MBReleaseGroupID != "" {
+	// A release-keyed album (split edition, e.g. an instrumental release)
+	// beats the release-group album when the file's tags name it directly.
+	if fm.MBReleaseID != "" {
+		album, _ = s.queries.FindAlbumByProvider(musicbrainzProvider, fm.MBReleaseID)
+	}
+	if album == nil && fm.MBReleaseGroupID != "" {
 		album, _ = s.queries.FindAlbumByProvider(musicbrainzProvider, fm.MBReleaseGroupID)
 	}
 	if album == nil && fm.Album != "" {

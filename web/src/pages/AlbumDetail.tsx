@@ -150,6 +150,17 @@ export default function AlbumDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  const splitEdition = useMutation({
+    mutationFn: (releaseId: string) => api.splitAlbumEdition(Number(id), releaseId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['album'] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
+      toast(`Edition split into a separate album — ${res.moved} track(s) moved, ${res.added} added`, 'success');
+      navigate(`/album/${res.album_id}`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   const unignoreTrack = useMutation({
     mutationFn: (trackId: number) => api.unignoreTrack(trackId),
     onSuccess: () => {
@@ -367,6 +378,31 @@ export default function AlbumDetail() {
               </select>
             )}
           </div>
+          {editions && editions.editions.filter((e) => e.id !== album.release_id).length > 0 && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <select
+                value=""
+                disabled={splitEdition.isPending}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) splitEdition.mutate(v);
+                  e.target.value = '';
+                }}
+                className="h-7 min-w-0 max-w-full text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 disabled:opacity-50"
+                title="Create a separate album for an edition — matching tracks move over (e.g. an instrumental release you also own)"
+              >
+                <option value="">Split edition into separate album…</option>
+                {editions.editions
+                  .filter((e) => e.id !== album.release_id)
+                  .map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
+                      {e.track_count ? ` (${e.track_count} tracks)` : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
         </div>
         {album.provider !== 'local' && (
           <button
