@@ -9,7 +9,30 @@ import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
 import type { Track, Album, ProviderInfo } from '../types/index';
 
-const ALBUM_TYPE_ORDER = ['album', 'ep', 'single', 'compilation', 'live', 'remix', 'soundtrack', 'dj-mix', 'mixtape', 'demo'];
+const ALBUM_TYPE_ORDER = [
+  'album', 'ep', 'single', 'compilation',
+  'live', 'remix', 'soundtrack', 'dj-mix', 'mixtape', 'demo',
+  'spokenword', 'interview', 'audiobook', 'field-recording', 'audio-drama',
+];
+// Watch-type defaults — primary types on, secondary types off (they're
+// collected as ignored unless enabled).
+const WATCH_TYPE_DEFAULTS: Record<string, boolean> = {
+  album: true,
+  ep: true,
+  single: true,
+  compilation: true,
+  live: false,
+  remix: false,
+  soundtrack: false,
+  'dj-mix': false,
+  mixtape: false,
+  demo: false,
+  spokenword: false,
+  interview: false,
+  audiobook: false,
+  'field-recording': false,
+  'audio-drama': false,
+};
 const ALBUM_TYPE_LABELS: Record<string, string> = {
   album: 'Albums',
   ep: 'EPs',
@@ -251,19 +274,22 @@ export default function ArtistDetail() {
     }));
   }, [filteredAlbums]);
 
-  // Effective watch types: per-artist override if set, else the global
-  // new_release_types setting, else everything.
+  // Effective watch types: per-artist override merged over the global
+  // new_release_types setting, merged over defaults — so keys newer than a
+  // stored override still reflect the global value instead of looking "on".
   const globalTypes = useMemo((): Record<string, boolean> => {
-    const d: Record<string, boolean> = { album: true, ep: true, single: true, compilation: true };
     if (settings?.new_release_types) {
       try {
-        return { ...d, ...JSON.parse(settings.new_release_types) };
+        return { ...WATCH_TYPE_DEFAULTS, ...JSON.parse(settings.new_release_types) };
       } catch { /* malformed — fall through to defaults */ }
     }
-    return d;
+    return WATCH_TYPE_DEFAULTS;
   }, [settings]);
 
-  const effectiveTypes = artist?.watch_release_types ?? globalTypes;
+  const effectiveTypes = useMemo(
+    () => ({ ...globalTypes, ...(artist?.watch_release_types ?? {}) }),
+    [globalTypes, artist],
+  );
 
   // Sections for unchecked watch types start collapsed; the user can expand
   // them freely afterwards. Initialized once artist + settings have loaded.

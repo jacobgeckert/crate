@@ -56,6 +56,17 @@ const DEFAULT_RELEASE_TYPES: Record<string, boolean> = {
   ep: true,
   single: true,
   compilation: true,
+  live: false,
+  remix: false,
+  soundtrack: false,
+  'dj-mix': false,
+  mixtape: false,
+  demo: false,
+  spokenword: false,
+  interview: false,
+  audiobook: false,
+  'field-recording': false,
+  'audio-drama': false,
 };
 
 const RELEASE_TYPE_LABELS: [string, string][] = [
@@ -63,6 +74,17 @@ const RELEASE_TYPE_LABELS: [string, string][] = [
   ['ep', 'EPs'],
   ['single', 'Singles'],
   ['compilation', 'Compilations'],
+  ['live', 'Live'],
+  ['remix', 'Remixes'],
+  ['soundtrack', 'Soundtracks'],
+  ['dj-mix', 'DJ Mixes'],
+  ['mixtape', 'Mixtapes'],
+  ['demo', 'Demos'],
+  ['spokenword', 'Spoken Word'],
+  ['interview', 'Interviews'],
+  ['audiobook', 'Audiobooks'],
+  ['field-recording', 'Field Recordings'],
+  ['audio-drama', 'Audio Dramas'],
 ];
 
 export default function Settings() {
@@ -346,7 +368,8 @@ export default function Settings() {
       <SettingsSection title="New Releases">
         <p className="text-[11px] text-zinc-500 mb-3">
           Release types the watcher auto-adds for artists with "Watch for new releases" enabled.
-          Unchecked types are skipped when new releases are detected.
+          Unchecked types are skipped when new releases are detected — secondary-type releases
+          (Live, Remix, etc.) are still collected but land ignored.
         </p>
         <div className="space-y-2">
           {RELEASE_TYPE_LABELS.map(([key, label]) => (

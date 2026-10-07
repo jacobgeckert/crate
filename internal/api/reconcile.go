@@ -566,13 +566,11 @@ func (s *Server) newReleaseWatchFor(artist *models.Artist) *newReleaseWatch {
 
 // qualifies mirrors the scheduler's gate: watched type, released on/after the
 // watch start. A missing release date doesn't disqualify (can't prove it's
-// old), matching detectNewReleases. Secondary-type releases ("Album + Live",
-// "Album + Compilation") never qualify — they land ignored by default.
+// old), matching detectNewReleases. Secondary-type releases ride the same
+// type gate — their record_types default off, so they land ignored unless the
+// user enables them.
 func (w *newReleaseWatch) qualifies(pa *pb.AlbumSummary) bool {
 	if !w.watching {
-		return false
-	}
-	if pa.Metadata["secondary_types"] != "" {
 		return false
 	}
 	if t := pa.RecordType; t != "" && !w.types[t] {
@@ -589,7 +587,14 @@ func (w *newReleaseWatch) qualifies(pa *pb.AlbumSummary) bool {
 // globalNewReleaseTypes mirrors the scheduler's new_release_types setting —
 // missing or malformed means all types watched.
 func (s *Server) globalNewReleaseTypes() map[string]bool {
-	types := map[string]bool{"album": true, "ep": true, "single": true, "compilation": true}
+	types := map[string]bool{
+		"album": true, "ep": true, "single": true, "compilation": true,
+		// Secondary types ("Album + Live" etc.) are collected but ignored
+		// unless the user opts in.
+		"live": false, "remix": false, "soundtrack": false, "dj-mix": false,
+		"mixtape": false, "demo": false, "spokenword": false, "interview": false,
+		"audiobook": false, "field-recording": false, "audio-drama": false,
+	}
 	v, err := s.queries.GetSetting("new_release_types")
 	if err != nil || v == "" {
 		return types

@@ -62,7 +62,14 @@ func (s *Service) Run(ctx context.Context) {
 // from the new_release_types setting (JSON object). Missing or malformed
 // settings default to watching everything.
 func (s *Service) newReleaseTypes() map[string]bool {
-	types := map[string]bool{"album": true, "ep": true, "single": true, "compilation": true}
+	types := map[string]bool{
+		"album": true, "ep": true, "single": true, "compilation": true,
+		// Secondary types ("Album + Live" etc.) are collected but ignored
+		// unless the user opts in.
+		"live": false, "remix": false, "soundtrack": false, "dj-mix": false,
+		"mixtape": false, "demo": false, "spokenword": false, "interview": false,
+		"audiobook": false, "field-recording": false, "audio-drama": false,
+	}
 	v, err := s.queries.GetSetting("new_release_types")
 	if err != nil || v == "" {
 		return types
@@ -131,7 +138,7 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 			}
 			albumStatus := models.AlbumStatusWatched
 			trackStatus := models.TrackStatusWanted
-			if !watchedType || secondary {
+			if !watchedType {
 				albumStatus = models.AlbumStatusIgnored
 				trackStatus = models.TrackStatusIgnored
 			}
