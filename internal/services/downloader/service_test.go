@@ -900,3 +900,98 @@ func TestPickBestFilePreferredUserLosesTwoTierGap(t *testing.T) {
 		t.Errorf("expected quality to win a two-tier gap, got %s", best.username)
 	}
 }
+
+func albumWantedTracks() []*models.Track {
+	return []*models.Track{
+		{ID: 1, Title: "Song One", ArtistName: "Artist", AlbumTitle: "Album"},
+		{ID: 2, Title: "Song Two", ArtistName: "Artist", AlbumTitle: "Album"},
+		{ID: 3, Title: "Song Three", ArtistName: "Artist", AlbumTitle: "Album"},
+	}
+}
+
+func TestPickAlbumSourcePrefersFullCoverage(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username: "partial",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Album/Artist - Song One.flac", Size: 30000000},
+			},
+		},
+		{
+			Username: "complete",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Album/Artist - Song One.flac", Size: 30000000},
+				{Filename: "music/Artist - Album/Artist - Song Two.flac", Size: 30000000},
+				{Filename: "music/Artist - Album/Artist - Song Three.flac", Size: 30000000},
+			},
+		},
+	}
+	user, files := pickAlbumSource(results, albumWantedTracks(), nil, defaultCfg)
+	if user != "complete" {
+		t.Fatalf("expected the full-coverage peer, got %q", user)
+	}
+	if len(files) != 3 {
+		t.Fatalf("expected 3 matched tracks, got %d", len(files))
+	}
+	for _, tr := range albumWantedTracks() {
+		if _, ok := files[tr.ID]; !ok {
+			t.Errorf("track %d not matched", tr.ID)
+		}
+	}
+}
+
+func TestPickAlbumSourceTieBreaksOnQuality(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username: "lowqual",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Album/Artist - Song One.mp3", Size: 5000000, BitRate: 128},
+			},
+		},
+		{
+			Username: "hiqual",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Album/Artist - Song One.flac", Size: 30000000},
+			},
+		},
+	}
+	wanted := []*models.Track{{ID: 1, Title: "Song One", ArtistName: "Artist", AlbumTitle: "Album"}}
+	user, files := pickAlbumSource(results, wanted, nil, defaultCfg)
+	if user != "hiqual" {
+		t.Fatalf("equal coverage should prefer the higher-scoring peer, got %q", user)
+	}
+	if files[1].file.Filename != "music/Artist - Album/Artist - Song One.flac" {
+		t.Errorf("expected the flac pick, got %s", files[1].file.Filename)
+	}
+}
+
+func TestPickAlbumSourceSkipsCooledDown(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username: "banned",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Album/Artist - Song One.flac", Size: 30000000},
+			},
+		},
+	}
+	ac := &fakeAvailability{cooledDown: map[string]bool{"banned": true}}
+	user, files := pickAlbumSource(results, albumWantedTracks(), ac, defaultCfg)
+	if user != "" || len(files) != 0 {
+		t.Errorf("cooled-down peer must not be picked, got %q/%v", user, files)
+	}
+}
+
+func TestPickAlbumSourceNoMatch(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username: "someone",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Other - Different.flac", Size: 30000000},
+			},
+		},
+	}
+	user, files := pickAlbumSource(results, albumWantedTracks(), nil, defaultCfg)
+	if user != "" || len(files) != 0 {
+		t.Errorf("expected no source for an unmatched album, got %q/%v", user, files)
+	}
+}

@@ -826,13 +826,14 @@ func (s *Server) handleUnignoreAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.queries.UpdateTrackStatusByAlbum(id, models.TrackStatusIgnored, models.TrackStatusWanted)
-	// Un-ignoring means "I want this" — enqueue now rather than waiting for
-	// the scheduler's next wanted-tracks sweep.
-	if ids, err := s.queries.ListWantedTrackIDsByAlbum(id); err == nil && len(ids) > 0 {
-		if n, err := s.queries.EnqueueDownloadBatch(ids); err == nil {
-			slog.Info("unignore: queued tracks for download", "album_id", id, "tracks", n)
-		}
-	}
+	// Un-ignoring means "I want this" — download now rather than waiting for
+	// the scheduler's next wanted-tracks sweep. Album-first search, per-track
+	// fallback for whatever a single source can't cover.
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		s.downloader.DownloadAlbum(context.Background(), id)
+	}()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "watched"})
 }
 
@@ -909,16 +910,15 @@ func (s *Server) handleQueueAlbumTracks(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list wanted tracks")
 		return
 	}
-	ids := make([]int64, len(tracks))
-	for i, t := range tracks {
-		ids[i] = t.ID
-	}
-	queued, err := s.queries.EnqueueDownloadBatch(ids)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to queue tracks")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]int{"queued": queued})
+	// Album-first: one slskd search for the whole album, single-source what it
+	// can, per-track pipeline for the rest. Runs async — the slskd search
+	// takes seconds.
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		s.downloader.DownloadAlbum(context.Background(), id)
+	}()
+	writeJSON(w, http.StatusOK, map[string]int{"queued": len(tracks)})
 }
 
 func (s *Server) handleStartManualSearch(w http.ResponseWriter, r *http.Request) {

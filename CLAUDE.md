@@ -108,6 +108,7 @@ All file selection goes through `scoreCandidates()` in `internal/services/downlo
 - **Artist bonus (+20)**: in manual search results, artist name in filename adds +20. Kept below the tier gap (25) so quality always dominates between tiers.
 - **Free slot bonus (+10)**: if user has a free upload slot (instant start).
 - **Queue score (0-15)**: `15 / (1 + queueLength)`. Empty queue = 15, decays toward 0.
+- **Album-first sourcing**: album-level entry points (queue album, un-ignore) run `DownloadAlbum` instead of per-track enqueues — one slskd search for "Artist Album", pick the peer whose share covers the most wanted tracks (`pickAlbumSource`, same scoring/guards as the per-track path: tier, artist+title in path, blacklist/cooldown, negative keywords), then `beginTransfer` those files directly. Tracks nobody's share covers — or already in flight — fall back to the normal per-track pipeline. The scheduler's wanted-track sweep is unaffected (it feeds the per-track pipeline).
 - **Same-source bonus (+30)**: auto-downloads prefer peers already serving other tracks on the same album (`tracks.downloaded_from`, gathered via `ListAlbumDownloadSources`). Beats a one-tier gap so albums consolidate on one user; a two-tier quality drop still falls back to the better file. Auto-downloads only — manual search never gets it.
 
 Design invariants (enforced by `TestScoringBalance`):

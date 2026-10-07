@@ -330,32 +330,165 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 		"track_id", track.ID,
 		"album_source", cfg.preferredUsers[best.username],
 	)
-	s.logActivity("download_started", "track", track.ID,
-		fmt.Sprintf("Downloading from %s: %s", best.username, filepath.Base(best.file.Filename)))
-
-	_ = s.queries.UpdateTrackDownloadedFrom(track.ID, best.username)
-	_ = s.queries.UpdateTrackDownloadedFilename(track.ID, best.file.Filename)
-
-	ext := strings.ToLower(filepath.Ext(best.file.Filename))
-	if format := strings.TrimPrefix(ext, "."); format != "" {
-		_ = s.queries.UpdateTrackQuality(track.ID, format, best.file.BitRate)
-	}
-
-	transfer, err := s.slskd.StartDownload(ctx, best.username, best.file.Filename, best.file.Size)
-	if err != nil {
+	if err := s.beginTransfer(ctx, d.ID, track, best.username, best.file); err != nil {
 		s.queries.CooldownUser(best.username, "download failed: "+err.Error(), s.getCooldownDuration())
 		slog.Info("downloader: download start failed, shadow banning user", "username", best.username, "error", err)
 		return s.failWithRetry(d, err.Error())
 	}
 
 	_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
+	return nil
+}
+
+// beginTransfer stamps the chosen source on the track, asks slskd for the
+// file, and flips the queue row + track to downloading under the transfer key.
+func (s *Service) beginTransfer(ctx context.Context, downloadID int64, track *models.Track, username string, f slskd.SearchFile) error {
+	s.logActivity("download_started", "track", track.ID,
+		fmt.Sprintf("Downloading from %s: %s", username, filepath.Base(f.Filename)))
+
+	_ = s.queries.UpdateTrackDownloadedFrom(track.ID, username)
+	_ = s.queries.UpdateTrackDownloadedFilename(track.ID, f.Filename)
+
+	ext := strings.ToLower(filepath.Ext(f.Filename))
+	if format := strings.TrimPrefix(ext, "."); format != "" {
+		_ = s.queries.UpdateTrackQuality(track.ID, format, f.BitRate)
+	}
+
+	transfer, err := s.slskd.StartDownload(ctx, username, f.Filename, f.Size)
+	if err != nil {
+		return err
+	}
 
 	// Store transfer ID in slskd_search_id field (reuse the column)
-	transferKey := best.username + "|" + transfer.ID
-	if err := s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusDownloading, &transferKey, nil); err != nil {
+	transferKey := username + "|" + transfer.ID
+	if err := s.queries.UpdateDownloadStatus(downloadID, models.DownloadStatusDownloading, &transferKey, nil); err != nil {
 		return err
 	}
 	return s.queries.UpdateTrackStatus(track.ID, models.TrackStatusDownloading)
+}
+
+// DownloadAlbum tries to source an entire album from a single Soulseek peer
+// before any per-track searches: one "Artist Album" search, pick the user
+// whose share covers the most wanted tracks (same scoring/guards as the
+// per-track pipeline), and start those transfers directly. Tracks nobody's
+// share covers — or whose queue row is already in flight — are enqueued for
+// the normal per-track pipeline.
+func (s *Service) DownloadAlbum(ctx context.Context, albumID int64) {
+	album, err := s.queries.GetAlbum(albumID)
+	if err != nil || album == nil {
+		return
+	}
+	artist, err := s.queries.GetArtist(album.ArtistID)
+	if err != nil || artist == nil {
+		return
+	}
+	tracks, err := s.queries.ListTracksByAlbum(albumID)
+	if err != nil {
+		return
+	}
+	var wanted []*models.Track
+	for i := range tracks {
+		if tracks[i].Status != models.TrackStatusWanted {
+			continue
+		}
+		tracks[i].ArtistName = artist.Name
+		tracks[i].AlbumTitle = album.Title
+		wanted = append(wanted, &tracks[i])
+	}
+	if len(wanted) == 0 {
+		return
+	}
+
+	query := artist.Name + " " + album.Title
+	slog.Info("downloader: album search", "query", query, "album", album.Title, "wanted", len(wanted))
+	s.logActivity("search_started", "album", albumID,
+		fmt.Sprintf("Searching for album: %s - %s", artist.Name, album.Title))
+
+	search, err := s.slskd.StartSearch(ctx, query)
+	if err != nil {
+		slog.Warn("downloader: album search failed, using per-track pipeline", "album", album.Title, "error", err)
+		s.enqueueTrackIDs(wanted)
+		return
+	}
+	defer func() { _ = s.slskd.DeleteSearch(context.Background(), search.ID) }()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for !search.IsComplete && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+		search, err = s.slskd.GetSearch(ctx, search.ID)
+		if err != nil {
+			slog.Warn("downloader: album search poll failed, using per-track pipeline", "album", album.Title, "error", err)
+			s.enqueueTrackIDs(wanted)
+			return
+		}
+	}
+
+	cfg := s.getScoringConfig()
+	cfg.excludeNegative = true
+	bestUser, files := pickAlbumSource(search.Responses, wanted, s.queries, cfg)
+	if bestUser == "" {
+		slog.Info("downloader: no single-source match, using per-track pipeline", "album", album.Title)
+		s.enqueueTrackIDs(wanted)
+		return
+	}
+
+	slog.Info("downloader: album sourced from one peer", "album", album.Title,
+		"username", bestUser, "tracks", len(files), "wanted", len(wanted))
+	for _, tr := range wanted {
+		cand, ok := files[tr.ID]
+		if !ok {
+			continue
+		}
+		dlID, err := s.queries.EnqueueDownloadReturningID(tr.ID)
+		if err != nil || dlID == 0 {
+			continue // already in flight — the normal pipeline owns it
+		}
+		if err := s.beginTransfer(ctx, dlID, tr, bestUser, cand.file); err != nil {
+			s.queries.CooldownUser(bestUser, "download failed: "+err.Error(), s.getCooldownDuration())
+			slog.Info("downloader: album transfer start failed, shadow banning user", "username", bestUser, "error", err)
+			continue // the pending queue row retries through the per-track path
+		}
+	}
+	s.enqueueTrackIDs(wanted) // covers tracks the album search couldn't
+}
+
+func (s *Service) enqueueTrackIDs(tracks []*models.Track) {
+	for _, t := range tracks {
+		_ = s.queries.EnqueueDownload(t.ID)
+	}
+}
+
+// pickAlbumSource scores each user's share against the album's wanted tracks
+// — same guards as the per-track path (tier, blacklist, cooldown, artist+title
+// in path) — and returns the user covering the most tracks with their best
+// file per track. "" when no user's share matches anything.
+func pickAlbumSource(results []slskd.SearchResult, wanted []*models.Track, ac availabilityChecker, cfg scoringConfig) (string, map[int64]candidate) {
+	cfg.requireArtist = true
+	bestUser := ""
+	var bestFiles map[int64]candidate
+	bestCoverage, bestScore := 0, 0
+	for _, res := range results {
+		if ac != nil && ac.IsUserCooledDown(res.Username) {
+			continue
+		}
+		single := []slskd.SearchResult{res}
+		files := make(map[int64]candidate)
+		score := 0
+		for _, tr := range wanted {
+			if cands := scoreCandidates(single, tr, ac, cfg); len(cands) > 0 {
+				files[tr.ID] = cands[0]
+				score += cands[0].score
+			}
+		}
+		if len(files) > bestCoverage || (len(files) == bestCoverage && len(files) > 0 && score > bestScore) {
+			bestUser, bestFiles, bestCoverage, bestScore = res.Username, files, len(files), score
+		}
+	}
+	return bestUser, bestFiles
 }
 
 // checkDownload polls an active transfer and marks complete when done.

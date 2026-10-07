@@ -917,6 +917,9 @@ func (q *Queries) ReenqueueDownload(trackID int64) error {
 	return err
 }
 
+// EnqueueDownloadReturningID inserts a pending row and returns its id, or 0
+// when the track already has an in-flight row (conflict). Callers must check
+// for 0 — LastInsertId would otherwise surface a stale id.
 func (q *Queries) EnqueueDownloadReturningID(trackID int64) (int64, error) {
 	result, err := q.db.Exec(
 		`INSERT INTO download_queue (track_id, status, source, created_at)
@@ -926,6 +929,9 @@ func (q *Queries) EnqueueDownloadReturningID(trackID int64) (int64, error) {
 	)
 	if err != nil {
 		return 0, err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return 0, nil
 	}
 	id, _ := result.LastInsertId()
 	return id, nil
