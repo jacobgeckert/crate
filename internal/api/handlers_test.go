@@ -1049,6 +1049,26 @@ func TestSplitTracks(t *testing.T) {
 	if w.Code != 409 {
 		t.Errorf("self-split: expected 409, got %d", w.Code)
 	}
+
+	// Pre-fix split state: the moved standard row squats on the release-track
+	// id the source needs. A refresh must rekey it local and recreate the row.
+	env.do("DELETE", fmt.Sprintf("/api/tracks/%d", srcTracks[0].ID), "")
+	squatter := trackByTitle(t, splitTracks, "Track B1")
+	if err := env.queries.RelinkTrack(squatter.ID, "test", "3002"); err != nil {
+		t.Fatalf("seed squatter: %v", err)
+	}
+	w = env.do("POST", fmt.Sprintf("/api/albums/%d/refresh", two.ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+	srcTracks, _ = env.queries.ListTracksByAlbum(two.ID)
+	if len(srcTracks) != 1 || srcTracks[0].ProviderID != "3002" {
+		t.Fatalf("source album after refresh = %+v, want Track B1 (test/3002) restored", srcTracks)
+	}
+	healed, _ := env.queries.GetTrack(squatter.ID)
+	if healed == nil || healed.Provider != "local" {
+		t.Errorf("squatter provider = %v, want local after heal", healed)
+	}
 }
 
 func TestUnwatchArtistCascades(t *testing.T) {

@@ -229,6 +229,29 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
 			Status:        trackStatus,
 		}); err != nil {
+			// A row on another album may be squatting this release-track id —
+			// e.g. it was moved before splits rekeyed unmatched rows. This
+			// album's own tracklist is authoritative for the id, so the
+			// squatter goes local and the create retries once.
+			if squatter, ferr := s.queries.FindTrackByProvider(providerName, pt.Id); ferr == nil && squatter != nil && squatter.AlbumID != albumID {
+				if rerr := s.queries.RelinkTrack(squatter.ID, provider.LocalProvider, fmt.Sprintf("loc-split-%d", squatter.ID)); rerr == nil {
+					slog.Info("sync: rekeyed squatted track to local", "album", title, "track", squatter.Title, "other_album", squatter.AlbumID)
+					if err := s.queries.CreateTrack(&models.Track{
+						AlbumID:       albumID,
+						Title:         pt.Title,
+						TrackNumber:   int(pt.TrackNumber),
+						DiscNumber:    int(pt.DiscNumber),
+						DurationMs:    int(pt.DurationMs),
+						Provider:      providerName,
+						ProviderID:    pt.Id,
+						MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
+						Status:        trackStatus,
+					}); err == nil {
+						added++
+						continue
+					}
+				}
+			}
 			slog.Error("sync: create track", "album", title, "track", pt.Title, "error", err)
 		} else {
 			added++
