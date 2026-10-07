@@ -948,7 +948,8 @@ func TestSetAlbumEditionReFoldsTracks(t *testing.T) {
 // chosen rows (relinking them to the release's track ids) and fills out the
 // rest of the release tracklist; the source keeps everything else.
 func TestSplitTracks(t *testing.T) {
-	env := newTestEnv(t)
+	libDir := t.TempDir()
+	env := newTestEnvWithLibrary(t, libDir)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
 
 	artists, _ := env.queries.ListArtists()
@@ -971,13 +972,24 @@ func TestSplitTracks(t *testing.T) {
 		MBRecordingID: strp("rec-b1-inst"), Status: models.TrackStatusOwned,
 	}
 	env.queries.CreateTrack(&inst1)
-	env.queries.UpdateTrackFilePath(inst1.ID, "Album Two/01-inst.flac")
 	inst2 := models.Track{
 		AlbumID: two.ID, Title: "Track B2 (instrumental)", TrackNumber: 2, DiscNumber: 1,
 		Provider: "test", ProviderID: "5001",
 		MBRecordingID: strp("rec-b2-inst"), Status: models.TrackStatusOwned,
 	}
 	env.queries.CreateTrack(&inst2)
+
+	// Owned rows need real files — folds stat file_path and revert missing.
+	for _, rel := range []string{"Album Two/01-inst.flac", "Album Two/02-inst.flac"} {
+		full := filepath.Join(libDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("fake audio"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env.queries.UpdateTrackFilePath(inst1.ID, "Album Two/01-inst.flac")
 	env.queries.UpdateTrackFilePath(inst2.ID, "Album Two/02-inst.flac")
 
 	// Also split the standard Track B1 row — the source album's tracklist
@@ -1068,6 +1080,48 @@ func TestSplitTracks(t *testing.T) {
 	healed, _ := env.queries.GetTrack(squatter.ID)
 	if healed == nil || healed.Provider != "local" {
 		t.Errorf("squatter provider = %v, want local after heal", healed)
+	}
+}
+
+// TestRefreshRevertsMissingFiles: an owned track whose file was deleted from
+// disk must come back wanted on refresh, not keep claiming ownership.
+func TestRefreshRevertsMissingFiles(t *testing.T) {
+	libDir := t.TempDir()
+	env := newTestEnvWithLibrary(t, libDir)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	album := albumByTitle(t, albums, "Album One")
+	tracks, _ := env.queries.ListTracksByAlbum(album.ID)
+
+	// Track A1 has a real file; Track A2's file path points at nothing
+	// (user deleted it from disk).
+	rel := "Test Artist/Album One/01 Track A1.flac"
+	full := filepath.Join(libDir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("fake audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a1 := trackByTitle(t, tracks, "Track A1")
+	a2 := trackByTitle(t, tracks, "Track A2")
+	env.queries.UpdateTrackFilePath(a1.ID, rel)
+	env.queries.UpdateTrackFilePath(a2.ID, "Test Artist/Album One/02 Track A2.flac")
+
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/refresh", album.ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+
+	got1, _ := env.queries.GetTrack(a1.ID)
+	if got1.Status != models.TrackStatusOwned {
+		t.Errorf("Track A1 status = %s, want owned (file exists)", got1.Status)
+	}
+	got2, _ := env.queries.GetTrack(a2.ID)
+	if got2.Status != models.TrackStatusWanted {
+		t.Errorf("Track A2 status = %s, want wanted (file deleted)", got2.Status)
 	}
 }
 

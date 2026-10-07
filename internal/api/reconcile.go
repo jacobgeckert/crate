@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/TheOutdoorProgrammer/crate/internal/library"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
@@ -274,10 +276,38 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 		}
 	}
 
-	if added > 0 || matched > 0 || merged > 0 || pruned > 0 {
-		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged, "stale_pruned", pruned)
+	reverted := s.verifyAlbumFiles(albumID)
+
+	if added > 0 || matched > 0 || merged > 0 || pruned > 0 || reverted > 0 {
+		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged, "stale_pruned", pruned, "files_reverted", reverted)
 	}
 	return
+}
+
+// verifyAlbumFiles reverts owned rows whose file vanished from disk back to
+// wanted — the same check the scheduler's daily integrity tick runs library-
+// wide, scoped to this album so a refresh reflects deletions immediately.
+// The stored file_path is kept so the download history/audit stays intact.
+func (s *Server) verifyAlbumFiles(albumID int64) (reverted int) {
+	tracks, err := s.queries.ListTracksByAlbum(albumID)
+	if err != nil {
+		slog.Error("sync: verify files", "album_id", albumID, "error", err)
+		return 0
+	}
+	for _, t := range tracks {
+		if t.Status != models.TrackStatusOwned || t.FilePath == nil {
+			continue
+		}
+		if _, err := os.Stat(library.ResolvePath(s.libraryDir, *t.FilePath)); os.IsNotExist(err) {
+			if err := s.queries.UpdateTrackStatus(t.ID, models.TrackStatusWanted); err != nil {
+				slog.Error("sync: revert missing-file track", "track_id", t.ID, "error", err)
+				continue
+			}
+			reverted++
+			slog.Warn("sync: file missing, reverted to wanted", "track_id", t.ID, "path", *t.FilePath)
+		}
+	}
+	return reverted
 }
 
 // matchByRecording returns the best unused candidate sharing pt's

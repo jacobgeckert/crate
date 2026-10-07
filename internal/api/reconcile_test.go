@@ -3,6 +3,8 @@ package api_test
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
@@ -17,7 +19,12 @@ func intp(i int) *int       { return &i }
 // the local provider, with a file on disk.
 func seedOwnedLocalTrack(t *testing.T, q *db.Queries, albumID int64, title, pid string, trackNo int) {
 	t.Helper()
-	fp := "somewhere/" + pid + ".flac"
+	// Owned rows assert a real file: folds stat file_path and revert missing
+	// files to wanted.
+	fp := filepath.Join(t.TempDir(), pid+".flac")
+	if err := os.WriteFile(fp, []byte("fake audio"), 0o644); err != nil {
+		t.Fatalf("seed file %q: %v", fp, err)
+	}
 	fmtStr := "flac"
 	if err := q.CreateImportedTrack(&models.Track{
 		AlbumID:         albumID,
