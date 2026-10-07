@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, AlbumFiles, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus } from '../types/index';
 
 const BASE = '/api';
 
@@ -98,7 +98,6 @@ export const api = {
     request<{ ok: boolean }>(`/albums/${id}/refresh`, { method: 'POST' }),
   getAlbumEditions: (id: number) =>
     request<{ editions: AlbumEdition[]; current?: string }>(`/albums/${id}/editions`),
-  getAlbumFiles: (id: number) => request<AlbumFiles>(`/albums/${id}/files`),
   setAlbumEdition: (id: number, releaseId: string | null) =>
     request<{ release_id?: string; matched: number; added: number; pruned: number }>(`/albums/${id}/edition`, {
       method: 'PUT',
