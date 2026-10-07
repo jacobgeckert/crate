@@ -613,7 +613,7 @@ export default function ArtistDetail() {
               {missingOnly && !trackFilter ? 'No releases with missing tracks' : 'No matching albums or tracks'}
             </p>
           )}
-          {albumGroups.filter((g) => PRIMARY_TYPES.has(g.type)).map(renderAlbumGroup)}
+          {albumGroups.filter((g) => PRIMARY_TYPES.has(g.type)).map((g) => renderAlbumGroup(g, artist.provider))}
           {(() => {
             const moreGroups = albumGroups.filter((g) => !PRIMARY_TYPES.has(g.type));
             if (moreGroups.length === 0) return null;
@@ -638,7 +638,7 @@ export default function ArtistDetail() {
                     <span className="text-[11px] text-zinc-600">· {moreCount}</span>
                   </button>
                 )}
-                {(albumGroups.length <= 1 || moreOpen) && moreGroups.map(renderAlbumGroup)}
+                {(albumGroups.length <= 1 || moreOpen) && moreGroups.map((g) => renderAlbumGroup(g, artist.provider))}
               </div>
             );
           })()}
@@ -647,7 +647,7 @@ export default function ArtistDetail() {
     </div>
   );
 
-  function renderAlbumGroup(group: { type: string; label: string; albums: Album[] }) {
+  function renderAlbumGroup(group: { type: string; label: string; albums: Album[] }, artistProvider: string) {
     return (
             <div key={group.type}>
               {albumGroups.length > 1 && (
@@ -702,7 +702,7 @@ export default function ArtistDetail() {
                     })()}
                   </p>
                 </div>
-                <AlbumStatusSummary album={album} artistProvider={artist.provider} />
+                <AlbumStatusSummary album={album} artistProvider={artistProvider} />
                 <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
               </Link>
                 ))}
