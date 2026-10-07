@@ -415,10 +415,31 @@ func (s *Server) enrichAlbumCover(ctx context.Context, albumID int64) {
 
 	if album.Provider == "musicbrainz" && album.ProviderID != "" {
 		var cands []string
-		if album.ReleaseID != nil && *album.ReleaseID != "" {
-			cands = append(cands, "https://coverartarchive.org/release/"+*album.ReleaseID+"/front-500")
+		pinned := ""
+		if album.ReleaseID != nil {
+			pinned = *album.ReleaseID
+		}
+		if pinned != "" {
+			cands = append(cands, "https://coverartarchive.org/release/"+pinned+"/front-500")
 		}
 		cands = append(cands, "https://coverartarchive.org/release-group/"+album.ProviderID+"/front-500")
+		// Editions share artwork often enough that a sibling pressing's cover
+		// beats nothing — try each release in the group, capped to bound the
+		// HEADs on release-groups with dozens of editions.
+		if detail, derr := s.providers.GetAlbum(ctx, "musicbrainz", album.ProviderID); derr == nil {
+			var editions []albumEdition
+			if raw := detail.Metadata["releases"]; raw != "" {
+				_ = json.Unmarshal([]byte(raw), &editions)
+			}
+			for _, e := range editions {
+				if len(cands) >= 10 {
+					break
+				}
+				if e.ID != "" && e.ID != pinned {
+					cands = append(cands, "https://coverartarchive.org/release/"+e.ID+"/front-500")
+				}
+			}
+		}
 		for _, u := range cands {
 			if !coverArtExists(ctx, u) {
 				continue
