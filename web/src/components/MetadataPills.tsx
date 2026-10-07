@@ -12,6 +12,10 @@ const knownKeys: Record<string, (v: string) => string> = {
 
 const keyOrder = ['type', 'country', 'disambiguation', 'active_since', 'fans'];
 
+// Internal plumbing keys that aren't display metadata (e.g. the serialized
+// edition list the album page's picker consumes).
+const hiddenKeys = new Set(['releases']);
+
 export default function MetadataPills({ metadata }: { metadata?: Record<string, string> }) {
   if (!metadata) return null;
 
@@ -26,7 +30,7 @@ export default function MetadataPills({ metadata }: { metadata?: Record<string, 
   });
 
   Object.keys(metadata).forEach((k) => {
-    if (!entries.some((e) => e.key === k)) {
+    if (!hiddenKeys.has(k) && !entries.some((e) => e.key === k)) {
       entries.push({ key: k, value: `${k}: ${metadata[k]}` });
     }
   });
