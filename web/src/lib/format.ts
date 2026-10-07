@@ -64,3 +64,9 @@ const PROVIDER_ALBUM_URL: Record<string, (id: string) => string> = {
 export function providerAlbumUrl(provider: string, providerId: string): string | undefined {
   return PROVIDER_ALBUM_URL[provider]?.(providerId);
 }
+
+export function recordTypeLabel(recordType: string): string {
+  const t = recordType || 'album';
+  if (t === 'ep') return 'EP';
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { formatDuration, formatTotalDuration, formatFileSize, providerAlbumUrl } from '../lib/format';
+import { formatDuration, formatTotalDuration, formatFileSize, providerAlbumUrl, recordTypeLabel } from '../lib/format';
 import FilterBar from '../components/FilterBar';
 import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import ProviderBadge from '../components/ProviderBadge';
@@ -16,6 +16,7 @@ export default function AlbumDetail() {
   const queryClient = useQueryClient();
 
   const { toast } = useToast();
+  const [coverFailed, setCoverFailed] = useState<string | null>(null);
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', id],
@@ -326,8 +327,8 @@ export default function AlbumDetail() {
     <div>
       <div className="flex items-center gap-3 mb-4">
         <div className="w-[74px] h-[74px] rounded-lg bg-zinc-800 overflow-hidden shrink-0">
-          {album.cover_url ? (
-            <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
+          {album.cover_url && coverFailed !== album.cover_url ? (
+            <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" onError={() => setCoverFailed(album.cover_url!)} />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-zinc-600">
               <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" /></svg>
@@ -476,7 +477,7 @@ export default function AlbumDetail() {
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
           </svg>
-          {queueAll.isSuccess ? 'Queued!' : queueAll.isPending ? 'Queuing...' : `Search ${stats.wantedTracks} wanted tracks`}
+          {queueAll.isSuccess ? 'Queued!' : queueAll.isPending ? 'Queuing...' : `Search ${recordTypeLabel(album.record_type)}`}
         </button>
       )}
 
