@@ -14,6 +14,8 @@ const ALBUM_TYPE_ORDER = [
   'live', 'remix', 'soundtrack', 'dj-mix', 'mixtape', 'demo',
   'spokenword', 'interview', 'audiobook', 'field-recording', 'audio-drama',
 ];
+// Primary types get their own section; everything else sits under "More".
+const PRIMARY_TYPES = new Set(['album', 'ep', 'single']);
 // Watch-type defaults — primary types on, secondary types off (they're
 // collected as ignored unless enabled).
 const WATCH_TYPE_DEFAULTS: Record<string, boolean> = {
@@ -294,6 +296,7 @@ export default function ArtistDetail() {
   // Sections for unchecked watch types start collapsed; the user can expand
   // them freely afterwards. Initialized once artist + settings have loaded.
   const [collapsed, setCollapsed] = useState<Record<string, boolean> | null>(null);
+  const [showMore, setShowMore] = useState(false);
   useEffect(() => {
     if (collapsed === null && artist && settings !== undefined) {
       const init: Record<string, boolean> = {};
@@ -610,7 +613,42 @@ export default function ArtistDetail() {
               {missingOnly && !trackFilter ? 'No releases with missing tracks' : 'No matching albums or tracks'}
             </p>
           )}
-          {albumGroups.map((group) => (
+          {albumGroups.filter((g) => PRIMARY_TYPES.has(g.type)).map(renderAlbumGroup)}
+          {(() => {
+            const moreGroups = albumGroups.filter((g) => !PRIMARY_TYPES.has(g.type));
+            if (moreGroups.length === 0) return null;
+            const moreCount = moreGroups.reduce((n, g) => n + g.albums.length, 0);
+            // Searching or missing-only can hide matches behind a collapsed
+            // More — open it automatically while a filter is active.
+            const moreOpen = showMore || !!trackFilter || missingOnly;
+            return (
+              <div>
+                {albumGroups.length > 1 && (
+                  <button
+                    onClick={() => setShowMore((v) => !v)}
+                    className="w-full flex items-center gap-1.5 mt-3 mb-1.5 text-left"
+                  >
+                    <svg
+                      className={`w-3 h-3 text-zinc-500 transition-transform ${moreOpen ? '' : '-rotate-90'}`}
+                      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                    <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">More</p>
+                    <span className="text-[11px] text-zinc-600">· {moreCount}</span>
+                  </button>
+                )}
+                {(albumGroups.length <= 1 || moreOpen) && moreGroups.map(renderAlbumGroup)}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+
+  function renderAlbumGroup(group: { type: string; label: string; albums: Album[] }) {
+    return (
             <div key={group.type}>
               {albumGroups.length > 1 && (
                 <button
@@ -671,11 +709,8 @@ export default function ArtistDetail() {
               </div>
               )}
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+    );
+  }
 }
 
 function AlbumStatusSummary({ album, artistProvider }: { album: Album; artistProvider: string }) {
