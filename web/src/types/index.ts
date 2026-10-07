@@ -46,6 +46,16 @@ export interface AlbumEdition {
   track_count?: number;
 }
 
+export interface AlbumFileEntry {
+  name: string;
+  size: number;
+}
+
+export interface AlbumFiles {
+  dir: string | null;
+  files: AlbumFileEntry[];
+}
+
 export interface Track {
   id: number;
   album_id: number;
