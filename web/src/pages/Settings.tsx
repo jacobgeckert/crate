@@ -69,6 +69,10 @@ const DEFAULT_RELEASE_TYPES: Record<string, boolean> = {
   'audio-drama': false,
 };
 
+// Primary types show inline; the rest collapse under "More" — matches the
+// grouping on the artist page release sections.
+const PRIMARY_RELEASE_TYPES = new Set(['album', 'ep', 'single']);
+
 const RELEASE_TYPE_LABELS: [string, string][] = [
   ['album', 'Albums'],
   ['ep', 'EPs'],
@@ -97,6 +101,7 @@ export default function Settings() {
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState('');
   const [releaseTypes, setReleaseTypes] = useState<Record<string, boolean>>(DEFAULT_RELEASE_TYPES);
+  const [showMoreTypes, setShowMoreTypes] = useState(false);
   const [namingPreview, setNamingPreview] = useState<{ path?: string; error?: string }>({});
 
   const { data: settings } = useQuery({
@@ -372,7 +377,30 @@ export default function Settings() {
           (Live, Remix, etc.) are still collected but land ignored.
         </p>
         <div className="space-y-2">
-          {RELEASE_TYPE_LABELS.map(([key, label]) => (
+          {RELEASE_TYPE_LABELS.filter(([key]) => PRIMARY_RELEASE_TYPES.has(key)).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={releaseTypes[key] ?? true}
+                onChange={(e) => setReleaseTypes({ ...releaseTypes, [key]: e.target.checked })}
+                className="w-4 h-4 rounded bg-zinc-800 border-zinc-600 accent-white"
+              />
+              <span className="text-sm text-zinc-300">{label}</span>
+            </label>
+          ))}
+          <button
+            onClick={() => setShowMoreTypes((v) => !v)}
+            className="flex items-center gap-1.5 text-[11px] text-zinc-500 active:text-zinc-300 transition-colors"
+          >
+            <svg
+              className={`w-3 h-3 transition-transform ${showMoreTypes ? '' : '-rotate-90'}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+            More
+          </button>
+          {showMoreTypes && RELEASE_TYPE_LABELS.filter(([key]) => !PRIMARY_RELEASE_TYPES.has(key)).map(([key, label]) => (
             <label key={key} className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
