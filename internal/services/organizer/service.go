@@ -96,6 +96,8 @@ func (s *Service) Organize(track *models.Track) error {
 
 	slog.Info("organizer: moved", "dest", dest)
 	s.removeReplacedFile(oldAbs, dest)
+	// Drop now-empty dirs the file's remote folder left under downloads.
+	pruneEmptyDirs(filepath.Dir(src), s.downloadsDir)
 
 	coverURL := ""
 	if album.CoverURL != nil {

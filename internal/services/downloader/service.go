@@ -524,6 +524,7 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 			transfer = t
 			key := username + "|" + t.ID
 			_ = s.queries.UpdateDownloadStatus(d.ID, d.Status, &key, nil)
+			d.SlskdSearchID = &key
 		} else if s.organizeIfOnDisk(ctx, d, username) {
 			return nil
 		} else {
@@ -540,6 +541,7 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 	case strings.Contains(state, "Errored"), strings.Contains(state, "Rejected"), strings.Contains(state, "Cancelled"):
 		_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
 		_ = s.queries.BlacklistFile(username, transfer.Filename, "transfer "+state)
+		s.removeTransferRecord(ctx, d)
 		slog.Info("downloader: blacklisted file", "username", username, "filename", filepath.Base(transfer.Filename))
 		s.logActivity("download_failed", "track", d.TrackID,
 			fmt.Sprintf("Transfer failed: %s from %s (blacklisted)", state, username))
@@ -600,7 +602,27 @@ func (s *Service) completeDownload(ctx context.Context, d models.DownloadQueueIt
 	for _, n := range s.notifiers {
 		n.TriggerScan(ctx)
 	}
-	return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusComplete, d.SlskdSearchID, nil)
+	if err := s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusComplete, d.SlskdSearchID, nil); err != nil {
+		return err
+	}
+	s.removeTransferRecord(ctx, d)
+	return nil
+}
+
+// removeTransferRecord drops a finished/dead transfer from slskd's downloads
+// list so completed transfers don't pile up there. Best-effort — the record
+// may already be gone (e.g. the on-disk rescue path).
+func (s *Service) removeTransferRecord(ctx context.Context, d models.DownloadQueueItem) {
+	if d.SlskdSearchID == nil {
+		return
+	}
+	parts := strings.SplitN(*d.SlskdSearchID, "|", 2)
+	if len(parts) != 2 {
+		return
+	}
+	if err := s.slskd.CancelDownload(ctx, parts[0], parts[1]); err != nil {
+		slog.Debug("downloader: could not remove slskd transfer record", "id", parts[1], "error", err)
+	}
 }
 
 // findTransferByFilename re-locates a transfer that vanished by id — slskd
