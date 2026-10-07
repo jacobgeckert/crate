@@ -325,11 +325,11 @@ export default function AlbumDetail() {
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
-        <div className="self-stretch shrink-0 rounded-lg bg-zinc-800 overflow-hidden">
+        <div className="w-[74px] h-[74px] rounded-lg bg-zinc-800 overflow-hidden shrink-0">
           {album.cover_url ? (
-            <img src={album.cover_url} alt={album.title} className="h-full aspect-square object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
+            <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
           ) : (
-            <div className="h-full aspect-square flex items-center justify-center text-zinc-600">
+            <div className="w-full h-full flex items-center justify-center text-zinc-600">
               <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" /></svg>
             </div>
           )}
