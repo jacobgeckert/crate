@@ -140,8 +140,10 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 // track list: local tracks matching a provider track by title (album-scoped,
 // disc/track number as tiebreak) are relinked in place so the owned file is
 // kept; provider tracks with no local match are created as wanted; local tracks
-// matching nothing stay owned + local. With no local tracks present it
-// degenerates to "create the missing wanted tracks", matching the watch path.
+// matching nothing stay owned + local; provider rows matching nothing are
+// pruned — leftovers from a different edition or stale listing. With no local
+// tracks present it degenerates to "create the missing wanted tracks",
+// matching the watch path.
 func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, albumID int64, albumProviderID string) {
 	title := fmt.Sprintf("album %d", albumID)
 	// Tracks created under an ignored album stay ignored — a wanted track under
@@ -162,13 +164,15 @@ func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, 
 		slog.Error("sync: failed to fetch release tracklist", "album", title, "provider", providerName, "provider_id", fetchID, "error", err)
 		return
 	}
-	s.foldAlbumTracks(providerName, albumID, title, trackStatus, detail, false)
+	s.foldAlbumTracks(providerName, albumID, title, trackStatus, detail, true)
 }
 
 // foldAlbumTracks folds a fetched provider tracklist into an album's rows.
-// When prune is set (explicit edition switch), provider-linked rows that match
-// nothing in the new listing and aren't owned or in-flight are deleted — they
-// belonged to the previous edition.
+// When prune is set, provider-linked rows that match nothing in the new
+// listing and aren't owned or in-flight are deleted — they're leftovers from
+// a different edition or an older listing. Pruning is skipped entirely when
+// the fetch returned no tracks, so a truncated provider response can't wipe
+// the album.
 func (s *Server) foldAlbumTracks(providerName string, albumID int64, title string, trackStatus models.TrackStatus, detail *pb.AlbumDetail, prune bool) (added, matched, merged, pruned int) {
 	existing, err := s.queries.ListTracksByAlbum(albumID)
 	if err != nil {
@@ -274,10 +278,11 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 		}
 	}
 
-	if prune {
+	if prune && len(detail.Tracks) > 0 {
 		// Provider rows that matched nothing in the new listing are leftovers
-		// from the previous edition. Owned/in-flight ones are kept — the file
-		// still exists — everything else is removed (queue rows cascade).
+		// from a different edition or an outdated tracklist. Owned/in-flight
+		// ones are kept — the file still exists — everything else is removed
+		// (queue rows cascade).
 		for pid, t := range byID {
 			if used[t.ID] || t.Status == models.TrackStatusOwned || t.Status == models.TrackStatusDownloading {
 				continue

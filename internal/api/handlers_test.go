@@ -1155,6 +1155,65 @@ func TestRefreshRevertsMissingFiles(t *testing.T) {
 	}
 }
 
+// Refresh prunes provider rows that aren't in the album's current listing —
+// leftovers from another edition or an outdated tracklist — while owned rows
+// with real files are always kept.
+func TestRefreshPrunesStrayTracks(t *testing.T) {
+	libDir := t.TempDir()
+	env := newTestEnvWithLibrary(t, libDir)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	album := albumByTitle(t, albums, "Album One")
+	tracks, _ := env.queries.ListTracksByAlbum(album.ID)
+
+	// A provider-linked stray — its id (3999) isn't in the fixture tracklist.
+	stray := models.Track{
+		AlbumID: album.ID, Title: "Phantom Track", TrackNumber: 9,
+		Provider: "test", ProviderID: "3999", Status: models.TrackStatusWanted,
+	}
+	if err := env.queries.CreateTrack(&stray); err != nil {
+		t.Fatal(err)
+	}
+
+	// An owned stray with a real file must survive the prune.
+	rel := "Test Artist/Album One/99 Bonus.flac"
+	full := filepath.Join(libDir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("fake audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ownedStray := models.Track{
+		AlbumID: album.ID, Title: "Bonus Cut", TrackNumber: 10,
+		Provider: "test", ProviderID: "3998", Status: models.TrackStatusOwned,
+	}
+	if err := env.queries.CreateTrack(&ownedStray); err != nil {
+		t.Fatal(err)
+	}
+	env.queries.UpdateTrackFilePath(ownedStray.ID, rel)
+
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/refresh", album.ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+
+	if got, _ := env.queries.GetTrack(stray.ID); got != nil {
+		t.Error("expected stray wanted row to be pruned")
+	}
+	got, _ := env.queries.GetTrack(ownedStray.ID)
+	if got == nil || got.Status != models.TrackStatusOwned {
+		t.Errorf("owned stray lost or reverted: %+v", got)
+	}
+	for _, tr := range tracks {
+		if got, _ := env.queries.GetTrack(tr.ID); got == nil {
+			t.Errorf("listed track %d wrongly pruned", tr.ID)
+		}
+	}
+}
+
 // Artist refresh lands in the activity log: a completed sync records
 // discography_sync, a provider-side failure records sync_failed instead of
 // vanishing silently.

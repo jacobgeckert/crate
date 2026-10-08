@@ -138,15 +138,15 @@ func (s *Server) handleRefreshAlbum(w http.ResponseWriter, r *http.Request) {
 			trackStatus = models.TrackStatusIgnored
 		}
 		s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Syncing tracks", Total: len(detail.Tracks)})
-		added, matched, merged, _ := s.foldAlbumTracks(providerName, albumID, title, trackStatus, detail, false)
+		added, matched, merged, pruned := s.foldAlbumTracks(providerName, albumID, title, trackStatus, detail, true)
 
 		s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Resolving cover art"})
 		s.enrichAlbumCover(ctx, albumID)
 
 		slog.Info("refresh: album refreshed", "album", title, "provider", providerName,
-			"tracks", len(detail.Tracks), "added", added, "matched", matched, "merged", merged)
+			"tracks", len(detail.Tracks), "added", added, "matched", matched, "merged", merged, "pruned", pruned)
 		s.activityLog.Record("album_refresh", "album", albumID, fmt.Sprintf(
-			"Refreshed %s from %s — %d track(s), %d added", title, providerName, len(detail.Tracks), added))
+			"Refreshed %s from %s — %d track(s), %d added, %d removed", title, providerName, len(detail.Tracks), added, pruned))
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
