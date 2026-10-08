@@ -8,6 +8,7 @@ import FilterBar from '../components/FilterBar';
 import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
+import { usePlayer, type PlayerTrack } from '../components/Player';
 import type { ManualSearchResult, Track, Album } from '../types/index';
 
 export default function AlbumDetail() {
@@ -16,6 +17,7 @@ export default function AlbumDetail() {
   const queryClient = useQueryClient();
 
   const { toast } = useToast();
+  const player = usePlayer();
   const [coverFailed, setCoverFailed] = useState<string | null>(null);
   const [splitMode, setSplitMode] = useState(false);
   const [splitSel, setSplitSel] = useState<Set<number>>(new Set());
@@ -312,6 +314,22 @@ export default function AlbumDetail() {
     return { totalDuration, ownedTracks, wantedTracks, totalTracks: album.tracks.length };
   }, [album]);
 
+  const toPlayerTrack = useCallback((t: Track): PlayerTrack => ({
+    id: t.id,
+    title: t.title,
+    artist: album?.artist_name,
+    album: album?.title,
+    coverUrl: album?.cover_url,
+  }), [album]);
+
+  const playQueue = useMemo((): PlayerTrack[] => {
+    if (!album?.tracks) return [];
+    return album.tracks
+      .filter((t) => t.status === 'owned' && t.file_path)
+      .sort((a, b) => (a.disc_number - b.disc_number) || (a.track_number - b.track_number))
+      .map(toPlayerTrack);
+  }, [album, toPlayerTrack]);
+
   const filteredTracks = useMemo((): Track[] => {
     if (!album?.tracks) return [];
     if (!trackFilter) return album.tracks;
@@ -407,6 +425,17 @@ export default function AlbumDetail() {
             )}
           </div>
         </div>
+        {playQueue.length > 0 && (
+          <button
+            onClick={() => player.play(playQueue[0], playQueue)}
+            className="p-1.5 rounded-lg transition-colors shrink-0 text-emerald-400 bg-zinc-800 active:bg-zinc-700"
+            title="Play album"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 4 14 8-14 8V4Z" />
+            </svg>
+          </button>
+        )}
         {album.provider !== 'local' && (
           <button
             onClick={() => refreshAlbum.mutate()}
@@ -590,6 +619,17 @@ export default function AlbumDetail() {
                         </p>
                       )}
                     </div>
+                    {track.status === 'owned' && track.file_path && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); player.play(toPlayerTrack(track), playQueue); }}
+                        className={`shrink-0 transition-colors ${player.current?.id === track.id ? 'text-emerald-400' : 'text-zinc-500 active:text-white'}`}
+                        title="Play"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m6 4 14 8-14 8V4Z" />
+                        </svg>
+                      </button>
+                    )}
                     {track.status === 'owned' && isLocalUnmatched && (
                       <>
                         <button

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/Toast';
+import { PlayerProvider } from './components/Player';
 import Library from './pages/Library';
 import Search from './pages/Search';
 import BrowseArtist from './pages/BrowseArtist';
@@ -31,6 +32,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
       <BrowserRouter>
+      <PlayerProvider>
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Library />} />
@@ -47,6 +49,7 @@ export default function App() {
             <Route path="/settings/blocked" element={<BlockedSources />} />
           </Route>
         </Routes>
+      </PlayerProvider>
       </BrowserRouter>
       </ToastProvider>
     </QueryClientProvider>

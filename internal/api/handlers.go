@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1031,6 +1033,62 @@ func (s *Server) handleUnwatchTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// streamableExts gates which stored files the player can stream — file_path is
+// trusted input (only the app writes it), but an extension allowlist keeps the
+// endpoint from ever doubling as a generic file server.
+var streamableExts = map[string]string{
+	".mp3": "audio/mpeg",
+	".flac": "audio/flac",
+	".wav": "audio/wav",
+	".ogg": "audio/ogg",
+	".oga": "audio/ogg",
+	".opus": "audio/opus",
+	".m4a": "audio/mp4",
+	".aac": "audio/aac",
+	".wv": "audio/wavpack",
+	".aif": "audio/aiff",
+	".aiff": "audio/aiff",
+}
+
+// handleStreamTrack serves the track's audio file with Range support so the
+// web player can seek. Imported files outside the library are streamable too —
+// reads don't carry the destructive-op containment requirement.
+func (s *Server) handleStreamTrack(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	track, err := s.queries.GetTrack(id)
+	if err != nil || track == nil {
+		writeError(w, http.StatusNotFound, "track not found")
+		return
+	}
+	if track.FilePath == nil || *track.FilePath == "" {
+		writeError(w, http.StatusNotFound, "no file for this track")
+		return
+	}
+	abs := library.ResolvePath(s.libraryDir, *track.FilePath)
+	mime, ok := streamableExts[strings.ToLower(filepath.Ext(abs))]
+	if !ok {
+		writeError(w, http.StatusUnsupportedMediaType, "file type is not streamable")
+		return
+	}
+	f, err := os.Open(abs) // #nosec G304 G703 -- path comes from the track's stored file_path, not request input
+	if err != nil {
+		writeError(w, http.StatusNotFound, "file missing from disk")
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not stat file")
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	http.ServeContent(w, r, filepath.Base(abs), fi.ModTime(), f)
 }
 
 // Downloads

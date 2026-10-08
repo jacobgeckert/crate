@@ -155,6 +155,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Delete("/{id}/search/{searchId}", s.handleDeleteManualSearch)
 			r.Post("/{id}/download", s.handleManualDownload)
 			r.Post("/{id}/reject", s.handleRejectTrack)
+			r.Get("/{id}/stream", s.handleStreamTrack)
 			r.Put("/{id}/ignore", s.handleIgnoreTrack)
 			r.Delete("/{id}/ignore", s.handleUnignoreTrack)
 		})

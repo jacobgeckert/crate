@@ -1474,6 +1474,77 @@ func TestUnwatchTrackWithDelete(t *testing.T) {
 	}
 }
 
+func TestStreamTrack(t *testing.T) {
+	libDir := t.TempDir()
+	env := newTestEnvWithLibrary(t, libDir)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	rel := "Test Artist/Album One/01 Track One.flac"
+	full := filepath.Join(libDir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("fake audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.queries.UpdateTrackStatus(tracks[0].ID, models.TrackStatusOwned)
+	env.queries.UpdateTrackFilePath(tracks[0].ID, rel)
+
+	w := env.do("GET", fmt.Sprintf("/api/tracks/%d/stream", tracks[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "audio/flac" {
+		t.Errorf("Content-Type = %q, want audio/flac", ct)
+	}
+	if w.Body.String() != "fake audio" {
+		t.Errorf("body = %q, want file contents", w.Body.String())
+	}
+	if w.Header().Get("Accept-Ranges") != "bytes" {
+		t.Error("expected Accept-Ranges for seeking")
+	}
+
+	// Range request → 206 partial content
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/tracks/%d/stream", tracks[0].ID), nil)
+	req.Header.Set("Range", "bytes=0-3")
+	rw := httptest.NewRecorder()
+	env.server.ServeHTTP(rw, req)
+	if rw.Code != 206 {
+		t.Fatalf("range: expected 206, got %d", rw.Code)
+	}
+	if rw.Body.String() != "fake" {
+		t.Errorf("range body = %q, want %q", rw.Body.String(), "fake")
+	}
+
+	// No file recorded → 404
+	w = env.do("GET", fmt.Sprintf("/api/tracks/%d/stream", tracks[1].ID), "")
+	if w.Code != 404 {
+		t.Errorf("no file_path: expected 404, got %d", w.Code)
+	}
+
+	// Path stored but file gone → 404
+	env.queries.UpdateTrackFilePath(tracks[1].ID, "Test Artist/Album One/missing.flac")
+	w = env.do("GET", fmt.Sprintf("/api/tracks/%d/stream", tracks[1].ID), "")
+	if w.Code != 404 {
+		t.Errorf("missing file: expected 404, got %d", w.Code)
+	}
+
+	// Non-audio extension → 415
+	txt := filepath.Join(libDir, "notes.txt")
+	if err := os.WriteFile(txt, []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.queries.UpdateTrackFilePath(tracks[1].ID, "notes.txt")
+	w = env.do("GET", fmt.Sprintf("/api/tracks/%d/stream", tracks[1].ID), "")
+	if w.Code != 415 {
+		t.Errorf("non-audio: expected 415, got %d", w.Code)
+	}
+}
+
 func TestQueueTrackForDownload(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
