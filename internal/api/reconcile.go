@@ -290,7 +290,14 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			slog.Error("sync: list tracks for prune", "album", title, "error", lerr)
 		}
 		for _, t := range tracks {
-			if used[t.ID] || t.Status == models.TrackStatusOwned || t.Status == models.TrackStatusDownloading {
+			if used[t.ID] {
+				continue
+			}
+			keep := t.Status == models.TrackStatusOwned || t.Status == models.TrackStatusDownloading
+			slog.Info("sync: prune pass stray", "album", title, "track_id", t.ID,
+				"track", t.Title, "provider", t.Provider, "provider_id", t.ProviderID,
+				"status", string(t.Status), "kept", keep)
+			if keep {
 				continue
 			}
 			if err := s.queries.DeleteTrack(t.ID); err != nil {
