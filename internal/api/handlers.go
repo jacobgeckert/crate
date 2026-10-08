@@ -1006,6 +1006,9 @@ func (s *Server) handleUnwatchTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ?delete=true removes the owned file from disk and marks the track
+	// ignored rather than deleting the row — the next tracklist fold would
+	// just recreate a deleted row as wanted and re-download the file.
 	if r.URL.Query().Get("delete") == "true" {
 		track, err := s.queries.GetTrackWithMeta(id)
 		if err == nil && track.Status == models.TrackStatusOwned {
@@ -1014,6 +1017,13 @@ func (s *Server) handleUnwatchTrack(w http.ResponseWriter, r *http.Request) {
 			}
 			s.triggerScanAsync()
 		}
+		s.queries.DeleteQueuedForTrack(id)
+		if err := s.queries.UpdateTrackStatus(id, models.TrackStatusIgnored); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to ignore track")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+		return
 	}
 
 	if err := s.queries.DeleteTrack(id); err != nil {

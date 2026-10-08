@@ -90,7 +90,7 @@ export default function AlbumDetail() {
   });
 
   const unwatchTrack = useMutation({
-    mutationFn: (trackId: number) => api.unwatchTrack(trackId),
+    mutationFn: (p: { trackId: number; deleteFile?: boolean }) => api.unwatchTrack(p.trackId, p.deleteFile),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['album', id] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
@@ -673,12 +673,12 @@ export default function AlbumDetail() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (confirm(`Delete "${track.title}"?`)) {
-                          unwatchTrack.mutate(track.id);
+                        if (confirm(`Delete "${track.title}"? ${track.status === 'owned' ? 'The file will be removed from your library and the track marked ignored.' : 'The track will be marked ignored.'}`)) {
+                          unwatchTrack.mutate({ trackId: track.id, deleteFile: true });
                         }
                       }}
                       className="ml-1 text-zinc-600 active:text-red-400 transition-colors shrink-0"
-                      title="Delete track"
+                      title="Delete track file"
                     >
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M18 6 6 18" /><path d="m6 6 12 12" />

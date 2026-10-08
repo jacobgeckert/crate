@@ -1358,22 +1358,78 @@ func TestUnwatchTrack(t *testing.T) {
 }
 
 func TestUnwatchTrackWithDelete(t *testing.T) {
-	env := newTestEnv(t)
+	libDir := t.TempDir()
+	env := newTestEnvWithLibrary(t, libDir)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
 
 	artists, _ := env.queries.ListArtists()
 	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
 	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
 
-	// delete=true on a non-owned track should still unwatch without error
+	// Owned track with an in-library file: the file is deleted and the row is
+	// kept, marked ignored — a deleted row would just be re-created by the
+	// next tracklist fold and re-downloaded.
+	rel := "Test Artist/Album One/01 Track One.flac"
+	full := filepath.Join(libDir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("fake audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.queries.UpdateTrackStatus(tracks[0].ID, models.TrackStatusOwned)
+	env.queries.UpdateTrackFilePath(tracks[0].ID, rel)
+
 	w := env.do("DELETE", fmt.Sprintf("/api/tracks/%d?delete=true", tracks[0].ID), "")
-	if w.Code != 204 {
-		t.Fatalf("expected 204, got %d", w.Code)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if _, err := os.Stat(full); !os.IsNotExist(err) {
+		t.Error("expected file to be deleted from disk")
 	}
 
-	remaining, _ := env.queries.ListTracksByAlbum(albums[0].ID)
-	if len(remaining) != len(tracks)-1 {
-		t.Errorf("expected %d tracks remaining, got %d", len(tracks)-1, len(remaining))
+	got, _ := env.queries.GetTrack(tracks[0].ID)
+	if got == nil {
+		t.Fatal("expected track row to remain")
+	}
+	if got.Status != models.TrackStatusIgnored {
+		t.Errorf("expected track ignored, got %s", got.Status)
+	}
+
+	// Non-owned track: no file to remove, but the row is still ignored, not
+	// deleted.
+	w = env.do("DELETE", fmt.Sprintf("/api/tracks/%d?delete=true", tracks[1].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	got, _ = env.queries.GetTrack(tracks[1].ID)
+	if got == nil {
+		t.Fatal("expected track row to remain")
+	}
+	if got.Status != models.TrackStatusIgnored {
+		t.Errorf("expected track ignored, got %s", got.Status)
+	}
+
+	// Owned track with a file outside the library: the path is refused, only
+	// the status flips.
+	outside := filepath.Join(t.TempDir(), "imported.flac")
+	if err := os.WriteFile(outside, []byte("fake audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := env.queries.ListTracksByAlbum(albums[1].ID)
+	env.queries.UpdateTrackStatus(other[0].ID, models.TrackStatusOwned)
+	env.queries.UpdateTrackFilePath(other[0].ID, outside)
+
+	w = env.do("DELETE", fmt.Sprintf("/api/tracks/%d?delete=true", other[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Error("file outside the library must not be deleted")
+	}
+	got, _ = env.queries.GetTrack(other[0].ID)
+	if got.Status != models.TrackStatusIgnored {
+		t.Errorf("expected track ignored, got %s", got.Status)
 	}
 }
 

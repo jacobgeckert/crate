@@ -96,8 +96,8 @@ export const api = {
     request<void>(`/artists/${id}`, { method: 'DELETE' }),
   unwatchAlbum: (id: number) =>
     request<void>(`/albums/${id}`, { method: 'DELETE' }),
-  unwatchTrack: (id: number) =>
-    request<void>(`/tracks/${id}`, { method: 'DELETE' }),
+  unwatchTrack: (id: number, deleteFile = false) =>
+    request<void>(`/tracks/${id}${deleteFile ? '?delete=true' : ''}`, { method: 'DELETE' }),
 
   refreshAlbum: (id: number) =>
     request<{ ok: boolean }>(`/albums/${id}/refresh`, { method: 'POST' }),
