@@ -153,8 +153,8 @@ export const api = {
   getStatus: () => request<SystemStatus>('/status'),
 
   listProviders: () => request<ProviderInfo[]>('/providers'),
-  listActivity: (limit = 50, offset = 0) =>
-    request<ActivityResponse>(`/activity?limit=${limit}&offset=${offset}`),
+  listActivity: (limit = 50, offset = 0, action = '') =>
+    request<ActivityResponse>(`/activity?limit=${limit}&offset=${offset}${action ? `&action=${encodeURIComponent(action)}` : ''}`),
   clearCache: () => request<void>('/cache', { method: 'DELETE' }),
   relinkEntity: (type: 'artist' | 'album' | 'track', id: number, providerID: string) =>
     request<{ status: string; reconciling?: boolean }>(`/relink/${type}/${id}`, {

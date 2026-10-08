@@ -1139,7 +1139,8 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 	if o := r.URL.Query().Get("offset"); o != "" {
 		fmt.Sscanf(o, "%d", &offset)
 	}
-	items, err := s.activityLog.List(limit, offset)
+	action := r.URL.Query().Get("action")
+	items, err := s.activityLog.List(limit, offset, action)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activity")
 		return
@@ -1147,10 +1148,15 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []models.ActivityLog{}
 	}
-	total, _ := s.activityLog.Count()
+	total, _ := s.activityLog.Count(action)
+	actions, _ := s.activityLog.Actions()
+	if actions == nil {
+		actions = []string{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items,
-		"total": total,
+		"items":   items,
+		"total":   total,
+		"actions": actions,
 	})
 }
 

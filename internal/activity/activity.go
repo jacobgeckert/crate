@@ -47,17 +47,26 @@ func (l *Log) Record(action, entityType string, entityID int64, details string) 
 	)
 }
 
-func (l *Log) List(limit, offset int) ([]models.ActivityLog, error) {
+// List returns log entries newest-first. A non-empty action filters to that
+// action type only.
+func (l *Log) List(limit, offset int, action string) ([]models.ActivityLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := l.db.Query(
-		`SELECT id, action, entity_type, entity_id, details, created_at
-		 FROM activity_log ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset,
-	)
+	query := `SELECT id, action, entity_type, entity_id, details, created_at
+		 FROM activity_log`
+	var args []any
+	if action != "" {
+		query += ` WHERE action = ?`
+		args = append(args, action)
+	}
+	query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := l.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +83,36 @@ func (l *Log) List(limit, offset int) ([]models.ActivityLog, error) {
 	return items, rows.Err()
 }
 
-func (l *Log) Count() (int, error) {
+// Actions lists the distinct action names present in the log — drives the
+// filter chips in the UI, so new action types surface automatically.
+func (l *Log) Actions() ([]string, error) {
+	rows, err := l.db.Query(`SELECT DISTINCT action FROM activity_log ORDER BY action`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var actions []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		actions = append(actions, a)
+	}
+	return actions, rows.Err()
+}
+
+// Count returns the number of log entries, optionally filtered by action.
+func (l *Log) Count(action string) (int, error) {
+	query := `SELECT COUNT(*) FROM activity_log`
+	var args []any
+	if action != "" {
+		query += ` WHERE action = ?`
+		args = append(args, action)
+	}
 	var count int
-	err := l.db.QueryRow(`SELECT COUNT(*) FROM activity_log`).Scan(&count)
+	err := l.db.QueryRow(query, args...).Scan(&count)
 	return count, err
 }
 

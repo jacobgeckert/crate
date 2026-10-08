@@ -162,6 +162,7 @@ export interface SearchResponse {
 export interface ActivityResponse {
   items: ActivityLog[];
   total: number;
+  actions: string[];
 }
 
 export interface ActivityLog {

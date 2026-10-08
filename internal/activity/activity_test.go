@@ -16,7 +16,7 @@ func TestRecordAndList(t *testing.T) {
 	log.Record("download_complete", "track", 1, "Downloaded track")
 	log.Record("download_failed", "track", 2, "Failed download")
 
-	items, err := log.List(10, 0)
+	items, err := log.List(10, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestListPagination(t *testing.T) {
 		log.Record("test", "track", int64(i), fmt.Sprintf("event %d", i))
 	}
 
-	items, err := log.List(3, 0)
+	items, err := log.List(3, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestListPagination(t *testing.T) {
 		t.Errorf("expected 3 items, got %d", len(items))
 	}
 
-	items, err = log.List(3, 3)
+	items, err = log.List(3, 3, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestListPagination(t *testing.T) {
 		t.Errorf("expected 3 items on page 2, got %d", len(items))
 	}
 
-	items, err = log.List(3, 9)
+	items, err = log.List(3, 9, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestListPagination(t *testing.T) {
 		t.Errorf("expected 1 item on last page, got %d", len(items))
 	}
 
-	items, err = log.List(3, 20)
+	items, err = log.List(3, 20, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestCount(t *testing.T) {
 	}
 	defer log.Close()
 
-	count, err := log.Count()
+	count, err := log.Count("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,12 +91,53 @@ func TestCount(t *testing.T) {
 	log.Record("test", "track", 1, "event")
 	log.Record("test", "track", 2, "event")
 
-	count, err = log.Count()
+	count, err = log.Count("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if count != 2 {
 		t.Errorf("expected 2, got %d", count)
+	}
+}
+
+func TestListAndCountFiltered(t *testing.T) {
+	log, err := NewLog(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+
+	log.Record("download_complete", "track", 1, "a")
+	log.Record("download_failed", "track", 2, "b")
+	log.Record("download_complete", "track", 3, "c")
+
+	items, err := log.List(10, 0, "download_complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 filtered items, got %d", len(items))
+	}
+	for _, it := range items {
+		if it.Action != "download_complete" {
+			t.Errorf("unexpected action %q in filtered list", it.Action)
+		}
+	}
+
+	count, err := log.Count("download_failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("expected filtered count 1, got %d", count)
+	}
+
+	actions, err := log.Actions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 2 || actions[0] != "download_complete" || actions[1] != "download_failed" {
+		t.Errorf("unexpected actions list: %v", actions)
 	}
 }
 
@@ -122,7 +163,7 @@ func TestPurge(t *testing.T) {
 		t.Errorf("expected 1 deleted, got %d", deleted)
 	}
 
-	items, err := log.List(10, 0)
+	items, err := log.List(10, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
