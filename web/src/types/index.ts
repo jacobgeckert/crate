@@ -332,6 +332,7 @@ export interface UploadCommitResult {
   committed: { file_id: number; track_id: number; path: string }[];
   skipped: number[];
   failed: { file_id: number; error: string }[];
+  cleared?: boolean;
 }
 
 export interface ArtistSyncStatus {

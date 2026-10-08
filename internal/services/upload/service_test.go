@@ -481,6 +481,92 @@ func TestIdentifyAutoPinsTaggedEdition(t *testing.T) {
 	}
 }
 
+// TestCommitClearsResolvedBatch: a fully committed batch is discarded
+// automatically — no leftover rows or staged dir in the batch list.
+func TestCommitClearsResolvedBatch(t *testing.T) {
+	s, q, uploadDir, _ := newTestService(t)
+	seedWantedTrack(t, q, "Radiohead", "OK Computer", "Paranoid Android")
+
+	src := filepath.Join(t.TempDir(), "song.mp3")
+	writeMP3(t, src, "Radiohead", "OK Computer", "Paranoid Android", 1)
+	fh, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fh.Close()
+	if _, err := s.Stage("bc", "song.mp3", fh, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Identify(context.Background(), "bc"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.Commit(context.Background(), "bc", "skip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Cleared {
+		t.Fatal("expected cleared batch")
+	}
+	if batches, _ := s.Batches(); len(batches) != 0 {
+		t.Fatalf("batches = %+v, want none after auto-clear", batches)
+	}
+	if _, err := os.Stat(filepath.Join(uploadDir, "bc")); !os.IsNotExist(err) {
+		t.Fatal("staged dir should be removed")
+	}
+}
+
+// TestCommitKeepsUnresolvedBatch: a batch with an unidentified file stays
+// listed after commit — the user still has work to do on it.
+func TestCommitKeepsUnresolvedBatch(t *testing.T) {
+	s, _, uploadDir, _ := newTestService(t)
+	seedWantedTrack(t, s.queries, "Radiohead", "OK Computer", "Paranoid Android")
+
+	src := filepath.Join(t.TempDir(), "song.mp3")
+	writeMP3(t, src, "Radiohead", "OK Computer", "Paranoid Android", 1)
+	fh, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stage("bk", "song.mp3", fh, 0); err != nil {
+		fh.Close()
+		t.Fatal(err)
+	}
+	fh.Close()
+
+	// Untagged second file → stays unidentified.
+	bare := filepath.Join(t.TempDir(), "bare.mp3")
+	if err := os.WriteFile(bare, []byte{0xFF, 0xFB, 0x90}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	bh, err := os.Open(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stage("bk", "bare.mp3", bh, 0); err != nil {
+		bh.Close()
+		t.Fatal(err)
+	}
+	bh.Close()
+
+	if err := s.Identify(context.Background(), "bk"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Commit(context.Background(), "bk", "skip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cleared {
+		t.Fatal("batch with unidentified file should not be cleared")
+	}
+	if batches, _ := s.Batches(); len(batches) != 1 {
+		t.Fatalf("batches = %+v, want the unresolved batch kept", batches)
+	}
+	if _, err := os.Stat(filepath.Join(uploadDir, "bk")); err != nil {
+		t.Fatal("staged dir should remain for unresolved batch")
+	}
+}
+
 func TestValidBatchID(t *testing.T) {
 	for name, want := range map[string]bool{
 		"abc-123":     true,

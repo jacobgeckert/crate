@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -103,6 +104,9 @@ type CommitResult struct {
 	Committed []CommittedFile `json:"committed"`
 	Skipped   []int64         `json:"skipped"`
 	Failed    []FailedFile    `json:"failed"`
+	// Cleared is true when the commit left nothing to review — the batch was
+	// discarded automatically.
+	Cleared bool `json:"cleared"`
 }
 
 type CommittedFile struct {
@@ -623,7 +627,32 @@ func (s *Service) Commit(ctx context.Context, batchID, onDuplicate string) (*Com
 			n.TriggerScan(ctx)
 		}
 	}
+	res.Cleared = s.clearIfResolved(batchID)
 	return res, nil
+}
+
+// clearIfResolved discards a batch once every file is resolved — committed,
+// skipped, or deliberately excluded — with nothing failed or unidentified
+// left. Batches holding failed or unidentified files stay listed so the user
+// can fix and retry.
+func (s *Service) clearIfResolved(batchID string) bool {
+	files, err := s.queries.ListUploadFiles(batchID)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if f.Skip {
+			continue
+		}
+		if f.State != models.UploadStateCommitted && f.State != models.UploadStateSkipped {
+			return false
+		}
+	}
+	if err := s.Discard(batchID); err != nil {
+		slog.Warn("upload: auto-clear failed", "batch", batchID, "error", err)
+		return false
+	}
+	return true
 }
 
 // fullMeta re-reads tags at commit time so format/bitrate/duration/MBRecordingID

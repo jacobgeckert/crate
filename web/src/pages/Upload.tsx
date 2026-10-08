@@ -198,8 +198,14 @@ export default function Upload() {
   const commit = useMutation({
     mutationFn: () => api.commitUpload(batchId!, replaceDupes ? 'replace' : 'skip'),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['upload-batch', batchId] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
+      if (res.cleared) {
+        // Fully committed batches are discarded server-side — leave the view.
+        setBatchId(null);
+        queryClient.invalidateQueries({ queryKey: ['upload-batches'] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['upload-batch', batchId] });
+      }
       toast(
         `Committed ${res.committed.length} file(s)` +
           (res.skipped.length ? `, ${res.skipped.length} skipped` : '') +
