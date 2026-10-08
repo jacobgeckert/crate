@@ -67,7 +67,7 @@ function PlayerBar() {
     <>
       {/* Page-bottom spacer so the fixed bar never covers content */}
       <div className="h-16" />
-      <div className="fixed left-0 right-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:bottom-0 z-50 bg-zinc-900 border-t border-zinc-800 px-3 py-2 flex items-center gap-3">
+      <div className="fixed left-0 right-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:bottom-0 z-50 bg-zinc-900/95 backdrop-blur-sm border-t border-zinc-800 px-3 py-2 flex items-center gap-3">
         {current.coverUrl ? (
           <img src={current.coverUrl} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
         ) : (
@@ -77,9 +77,9 @@ function PlayerBar() {
             </svg>
           </div>
         )}
-        <div className="min-w-0 w-32 sm:w-48 shrink-0">
-          <p className="text-sm font-medium truncate">{current.title}</p>
-          <p className="text-[11px] text-zinc-500 truncate">
+        <div className="min-w-0 w-40 sm:w-56 md:w-64 shrink-0">
+          <p className="text-sm font-semibold text-white truncate">{current.title}</p>
+          <p className="text-[11px] text-zinc-400 truncate">
             {[current.artist, current.album].filter(Boolean).join(' · ')}
           </p>
         </div>
@@ -100,6 +100,7 @@ function PlayerBar() {
           autoPlay
           onEnded={hasNext ? next : undefined}
           className="flex-1 min-w-0 h-9"
+          style={{ colorScheme: 'dark' }}
         />
         <button
           onClick={next}
