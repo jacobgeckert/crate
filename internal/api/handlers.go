@@ -713,6 +713,144 @@ func (s *Server) handleArtistImageCandidates(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
 }
 
+// handleAlbumCoverCandidates returns cover options for an album: the current
+// cover, HEAD-verified Cover Art Archive candidates (pinned edition, release
+// group, sibling editions) and Deezer album covers for the artist — title
+// matches first, then other editions for alternate art.
+func (s *Server) handleAlbumCoverCandidates(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	album, err := s.queries.GetAlbum(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "album not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get album")
+		return
+	}
+
+	type candidate struct {
+		Title    string `json:"title"`
+		CoverURL string `json:"cover_url"`
+		Provider string `json:"provider"`
+	}
+	out := []candidate{}
+	seen := map[string]bool{}
+	add := func(title, u, prov string) {
+		if u == "" || seen[u] || len(out) >= 24 {
+			return
+		}
+		seen[u] = true
+		out = append(out, candidate{title, u, prov})
+	}
+
+	cur := ""
+	if album.CoverURL != nil {
+		cur = *album.CoverURL
+	}
+	add(album.Title, cur, "current")
+
+	if album.Provider == "musicbrainz" && album.ProviderID != "" {
+		var cands []string
+		pinned := ""
+		if album.ReleaseID != nil {
+			pinned = *album.ReleaseID
+		}
+		if pinned != "" {
+			cands = append(cands, "https://coverartarchive.org/release/"+pinned+"/front-500")
+		}
+		cands = append(cands, "https://coverartarchive.org/release-group/"+album.ProviderID+"/front-500")
+		if detail, derr := s.providers.GetAlbum(r.Context(), "musicbrainz", album.ProviderID); derr == nil {
+			var editions []albumEdition
+			if raw := detail.Metadata["releases"]; raw != "" {
+				_ = json.Unmarshal([]byte(raw), &editions)
+			}
+			for _, e := range editions {
+				if len(cands) >= 10 {
+					break
+				}
+				if e.ID != "" && e.ID != pinned {
+					cands = append(cands, "https://coverartarchive.org/release/"+e.ID+"/front-500")
+				}
+			}
+		}
+		for _, u := range cands {
+			if coverArtExists(r.Context(), u) {
+				add(album.Title, u, "coverartarchive")
+			}
+		}
+	}
+
+	// Deezer covers for the artist's whole catalog — title matches first,
+	// then other editions so the user can pick alternate artwork.
+	if s.providers.IsHealthy("deezer") {
+		if artist, aerr := s.queries.GetArtist(album.ArtistID); aerr == nil && artist != nil {
+			if res, serr := s.providers.SearchWithProvider(r.Context(), "deezer", artist.Name, 5, 0); serr == nil {
+				artistID := ""
+				for _, a := range res.Artists {
+					if strings.EqualFold(a.Name, artist.Name) {
+						artistID = a.Id
+						break
+					}
+				}
+				if artistID == "" && len(res.Artists) > 0 {
+					artistID = res.Artists[0].Id
+				}
+				if artistID != "" {
+					if albums, aerr := s.providers.GetArtistAlbums(r.Context(), "deezer", artistID); aerr == nil {
+						for _, pa := range albums.Albums {
+							if pa.CoverUrl != "" && foldEqual(pa.Title, album.Title) {
+								add(pa.Title, pa.CoverUrl, "deezer")
+							}
+						}
+						for _, pa := range albums.Albums {
+							if pa.CoverUrl != "" && !foldEqual(pa.Title, album.Title) {
+								add(pa.Title, pa.CoverUrl, "deezer")
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
+}
+
+// handleSetAlbumCover sets (or clears, with an empty URL) an album's cover —
+// the manual override for the auto-picked Cover Art Archive / Deezer art.
+func (s *Server) handleSetAlbumCover(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		CoverURL string `json:"cover_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	u := strings.TrimSpace(req.CoverURL)
+	if u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		writeError(w, http.StatusBadRequest, "cover_url must be an http(s) URL")
+		return
+	}
+	if _, err := s.queries.GetAlbum(id); errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "album not found")
+		return
+	}
+	if err := s.queries.SetAlbumCoverURL(id, u); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set cover")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // handleSetArtistImage sets (or clears, with an empty URL) a watched artist's
 // image — the manual override for the Deezer auto-pick.
 func (s *Server) handleSetArtistImage(w http.ResponseWriter, r *http.Request) {

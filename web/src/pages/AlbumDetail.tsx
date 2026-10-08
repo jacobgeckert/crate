@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { formatDuration, formatTotalDuration, formatFileSize, providerAlbumUrl, recordTypeLabel } from '../lib/format';
+import { enlargeImageUrl, formatDuration, formatTotalDuration, formatFileSize, providerAlbumUrl, recordTypeLabel } from '../lib/format';
 import FilterBar from '../components/FilterBar';
 import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import ProviderBadge from '../components/ProviderBadge';
@@ -23,6 +23,8 @@ export default function AlbumDetail() {
   const [splitSel, setSplitSel] = useState<Set<number>>(new Set());
   const [splitRelease, setSplitRelease] = useState('');
   const [splitLink, setSplitLink] = useState('');
+  const [showCoverPicker, setShowCoverPicker] = useState(false);
+  const [showCoverEnlarge, setShowCoverEnlarge] = useState(false);
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', id],
@@ -37,6 +39,24 @@ export default function AlbumDetail() {
     queryKey: ['downloads'],
     queryFn: () => api.listDownloads(),
     refetchInterval: 5000,
+  });
+
+  const { data: coverCandidates, isLoading: coverCandidatesLoading } = useQuery({
+    queryKey: ['album-covers', id],
+    queryFn: () => api.getAlbumCoverCandidates(Number(id)),
+    enabled: showCoverPicker,
+  });
+
+  const setCover = useMutation({
+    mutationFn: (url: string) => api.setAlbumCover(Number(id), url),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      setCoverFailed(null);
+      setShowCoverPicker(false);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
   });
 
   // A local album is an unmatched import — load its artist so the user can link
@@ -385,7 +405,7 @@ export default function AlbumDetail() {
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-[74px] h-[74px] rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+        <div className="relative w-[74px] h-[74px] rounded-lg bg-zinc-800 overflow-hidden shrink-0 group">
           {album.cover_url && coverFailed !== album.cover_url ? (
             <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" onError={() => setCoverFailed(album.cover_url!)} />
           ) : (
@@ -393,6 +413,35 @@ export default function AlbumDetail() {
               <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" /></svg>
             </div>
           )}
+          {album.cover_url && coverFailed !== album.cover_url && (
+            <button
+              onClick={() => setShowCoverEnlarge(true)}
+              className="absolute inset-0"
+              aria-label={`Enlarge ${album.title} cover`}
+            />
+          )}
+          <div className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/60 opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity pointer-events-none">
+            {album.cover_url && coverFailed !== album.cover_url && (
+              <button
+                onClick={() => setShowCoverEnlarge(true)}
+                className="p-1 text-zinc-200 hover:text-white pointer-events-auto"
+                title="Enlarge cover"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /><path d="M11 8v6" /><path d="M8 11h6" />
+                </svg>
+              </button>
+            )}
+            <button
+              onClick={() => setShowCoverPicker(true)}
+              className="p-1 text-zinc-200 hover:text-white pointer-events-auto"
+              title="Pick a different cover"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-bold truncate">{album.title}</h2>
@@ -916,6 +965,68 @@ export default function AlbumDetail() {
             {selectedTrack.file_path && <DetailRow label="Path">{selectedTrack.file_path}</DetailRow>}
             <DetailRow label="Provider">{selectedTrack.provider} · {selectedTrack.provider_id}</DetailRow>
           </div>
+        )}
+      </DetailSheet>
+
+      {showCoverEnlarge && album.cover_url && (
+        <div
+          className="fixed inset-0 z-[95] flex flex-col items-center justify-center bg-black/90 p-4"
+          onClick={() => setShowCoverEnlarge(false)}
+        >
+          <img
+            src={enlargeImageUrl(album.cover_url)}
+            alt={album.title}
+            className="max-w-full max-h-[75vh] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+            onError={(e) => { (e.target as HTMLImageElement).src = album.cover_url!; }}
+          />
+          <div className="flex gap-2 mt-4" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => { setShowCoverEnlarge(false); setShowCoverPicker(true); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-300 active:bg-zinc-700 transition-colors"
+            >
+              Change cover
+            </button>
+            <button
+              onClick={() => setShowCoverEnlarge(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      <DetailSheet open={showCoverPicker} onClose={() => setShowCoverPicker(false)} title={`Pick cover — ${album.title}`}>
+        {coverCandidatesLoading && (
+          <p className="text-xs text-zinc-500 py-4 text-center">Searching for covers…</p>
+        )}
+        {!coverCandidatesLoading && (coverCandidates?.candidates.length ?? 0) === 0 && (
+          <p className="text-xs text-zinc-500 py-4 text-center">No cover art found.</p>
+        )}
+        <div className="grid grid-cols-3 gap-2">
+          {coverCandidates?.candidates.map((c) => (
+            <button
+              key={c.cover_url}
+              onClick={() => setCover.mutate(c.cover_url)}
+              disabled={setCover.isPending}
+              className="relative aspect-square rounded-lg overflow-hidden bg-zinc-800 disabled:opacity-50"
+            >
+              <img src={c.cover_url} alt={c.title} className="w-full h-full object-cover" />
+              <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-zinc-300 truncate px-1 py-0.5">
+                {c.title} · {c.provider}
+              </span>
+            </button>
+          ))}
+        </div>
+        {album.cover_url && (
+          <button
+            onClick={() => setCover.mutate('')}
+            disabled={setCover.isPending}
+            className="mt-3 w-full text-xs text-red-400 bg-zinc-800 rounded-lg py-2 active:bg-zinc-700 transition-colors disabled:opacity-50"
+          >
+            Remove cover
+          </button>
         )}
       </DetailSheet>
     </div>

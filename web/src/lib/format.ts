@@ -96,3 +96,9 @@ export function recordTypeLabel(recordType: string): string {
   const t = recordType || 'album';
   return RECORD_TYPE_LABELS[t] ?? t.charAt(0).toUpperCase() + t.slice(1);
 }
+
+// Deezer CDN URLs carry a WxH size segment — swap it for the largest variant
+// when enlarging. Other providers' URLs pass through unchanged.
+export function enlargeImageUrl(url: string): string {
+  return url.replace(/\/\d+x\d+-/, '/1000x1000-');
+}

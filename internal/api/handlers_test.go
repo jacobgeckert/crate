@@ -1331,6 +1331,62 @@ func TestArtistImagePicker(t *testing.T) {
 	}
 }
 
+// TestAlbumCoverPicker: candidates include the current cover (and, for
+// non-MusicBrainz albums with no Deezer, only it); PUT cover sets/clears
+// albums.cover_url.
+func TestAlbumCoverPicker(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("POST", "/api/watch/artist/1000", `{"provider": "test"}`)
+	if w.Code != 200 && w.Code != 201 {
+		t.Fatalf("watch artist: %d", w.Code)
+	}
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(albums) == 0 {
+		t.Fatal("no albums seeded")
+	}
+	al := albums[0]
+
+	env.queries.SetAlbumCoverURL(al.ID, "http://img/current.jpg")
+	w = env.do("GET", fmt.Sprintf("/api/albums/%d/covers", al.ID), "")
+	if w.Code != 200 {
+		t.Fatalf("covers: expected 200, got %d", w.Code)
+	}
+	resp := decode[struct {
+		Candidates []struct {
+			CoverURL string `json:"cover_url"`
+			Provider string `json:"provider"`
+		} `json:"candidates"`
+	}](t, w)
+	if len(resp.Candidates) != 1 || resp.Candidates[0].CoverURL != "http://img/current.jpg" {
+		t.Fatalf("expected only the current cover, got %+v", resp.Candidates)
+	}
+
+	w = env.do("PUT", fmt.Sprintf("/api/albums/%d/cover", al.ID), `{"cover_url":"http://img/picked.jpg"}`)
+	if w.Code != 200 {
+		t.Fatalf("set cover: expected 200, got %d", w.Code)
+	}
+	got, _ := env.queries.GetAlbum(al.ID)
+	if got.CoverURL == nil || *got.CoverURL != "http://img/picked.jpg" {
+		t.Fatalf("cover_url = %v, want picked", got.CoverURL)
+	}
+
+	w = env.do("PUT", fmt.Sprintf("/api/albums/%d/cover", al.ID), `{"cover_url":"javascript:x"}`)
+	if w.Code != 400 {
+		t.Fatalf("bad url: expected 400, got %d", w.Code)
+	}
+
+	w = env.do("PUT", fmt.Sprintf("/api/albums/%d/cover", al.ID), `{"cover_url":""}`)
+	if w.Code != 200 {
+		t.Fatalf("clear: expected 200, got %d", w.Code)
+	}
+	got, _ = env.queries.GetAlbum(al.ID)
+	if got.CoverURL != nil && *got.CoverURL != "" {
+		t.Errorf("cover_url should be cleared, got %q", *got.CoverURL)
+	}
+}
+
 // TestSplitTracksByURL: the split target can be a pasted MusicBrainz link —
 // a release link creates a release-keyed album, a release-group link a normal
 // unpinned album.

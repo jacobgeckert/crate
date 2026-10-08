@@ -370,3 +370,9 @@ export interface ArtistImageCandidate {
   image_url: string;
   provider: string;
 }
+
+export interface AlbumCoverCandidate {
+  title: string;
+  cover_url: string;
+  provider: string;
+}

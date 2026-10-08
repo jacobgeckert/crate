@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { formatTotalDuration, providerArtistUrl } from '../lib/format';
+import { enlargeImageUrl, formatTotalDuration, providerArtistUrl } from '../lib/format';
 import DetailSheet from '../components/DetailSheet';
 import FilterBar from '../components/FilterBar';
 import ProviderBadge from '../components/ProviderBadge';
@@ -46,11 +46,6 @@ function isUpcoming(album: Album): boolean {
   return (album.year ?? 0) > Number(today.slice(0, 4));
 }
 
-// Deezer CDN URLs carry a WxH size segment — swap it for the largest variant
-// when enlarging. Other providers' URLs pass through unchanged.
-function enlargeImageUrl(url: string): string {
-  return url.replace(/\/\d+x\d+-/, '/1000x1000-');
-}
 
 const ALBUM_TYPE_LABELS: Record<string, string> = {
   album: 'Albums',

@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, AlbumCoverCandidate } from '../types/index';
 
 const BASE = '/api';
 
@@ -104,6 +104,14 @@ export const api = {
 
   unwatchArtist: (id: number) =>
     request<void>(`/artists/${id}`, { method: 'DELETE' }),
+  getAlbumCoverCandidates: (id: number) =>
+    request<{ candidates: AlbumCoverCandidate[] }>(`/albums/${id}/covers`),
+  setAlbumCover: (id: number, coverUrl: string) =>
+    request<{ ok: boolean }>(`/albums/${id}/cover`, {
+      method: 'PUT',
+      body: JSON.stringify({ cover_url: coverUrl }),
+    }),
+
   unwatchAlbum: (id: number) =>
     request<void>(`/albums/${id}`, { method: 'DELETE' }),
   unwatchTrack: (id: number, deleteFile = false) =>
