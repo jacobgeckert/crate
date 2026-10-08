@@ -35,6 +35,16 @@ const WATCH_TYPE_DEFAULTS: Record<string, boolean> = {
   'field-recording': false,
   'audio-drama': false,
 };
+// Upcoming mirrors the Upcoming page: a release_date today or later. Albums
+// with no date but a future year count too. Partial dates ("2026-03",
+// "2026") compare lexicographically — start-of-precision, so a month-only
+// date leaves Upcoming as soon as that month starts.
+function isUpcoming(album: Album): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  if (album.release_date) return album.release_date >= today;
+  return (album.year ?? 0) > Number(today.slice(0, 4));
+}
+
 const ALBUM_TYPE_LABELS: Record<string, string> = {
   album: 'Albums',
   ep: 'EPs',
@@ -222,9 +232,14 @@ export default function ArtistDetail() {
     let ownedTracks = 0;
     let totalDuration = 0;
     let wantedTracks = 0;
+    let releasedReleases = 0;
     const recordTypes: Record<string, number> = {};
 
     for (const album of artist.albums) {
+      // Upcoming releases aren't part of the collection yet — their tracks
+      // stay out of every total.
+      if (isUpcoming(album)) continue;
+      releasedReleases++;
       const type = album.record_type || 'album';
       recordTypes[type] = (recordTypes[type] || 0) + 1;
       if (album.status === 'ignored') continue;
@@ -239,7 +254,7 @@ export default function ArtistDetail() {
       }
     }
 
-    return { totalTracks, ownedTracks, totalDuration, wantedTracks, recordTypes };
+    return { totalTracks, ownedTracks, totalDuration, wantedTracks, recordTypes, releasedReleases };
   }, [artist]);
 
   const filteredAlbums = useMemo((): Album[] => {
@@ -247,9 +262,10 @@ export default function ArtistDetail() {
     const q = trackFilter.toLowerCase();
     return artist.albums.filter((album) => {
       // Missing = a track that isn't owned or deliberately ignored; ignored
-      // albums are opted out of collection tracking entirely.
+      // albums are opted out of collection tracking entirely. Upcoming
+      // releases aren't missing — they're just not out yet.
       if (missingOnly) {
-        if (album.status === 'ignored') return false;
+        if (album.status === 'ignored' || isUpcoming(album)) return false;
         const hasMissing = album.tracks?.some(
           (t) => t.status !== 'owned' && t.status !== 'ignored',
         );
@@ -261,9 +277,20 @@ export default function ArtistDetail() {
     });
   }, [artist, trackFilter, missingOnly]);
 
+  // Upcoming releases get their own section regardless of record type —
+  // soonest release first.
+  const upcomingAlbums = useMemo(
+    () =>
+      filteredAlbums
+        .filter(isUpcoming)
+        .sort((a, b) => (a.release_date ?? '').localeCompare(b.release_date ?? '') || a.title.localeCompare(b.title)),
+    [filteredAlbums],
+  );
+
   const albumGroups = useMemo(() => {
     const groups = new Map<string, Album[]>();
     for (const al of filteredAlbums) {
+      if (isUpcoming(al)) continue;
       const t = al.record_type || 'album';
       const list = groups.get(t) ?? [];
       list.push(al);
@@ -553,7 +580,7 @@ export default function ArtistDetail() {
           <div className="bg-zinc-800/50 rounded-lg px-3 py-2.5 space-y-2.5">
             <ProgressBar owned={stats.ownedTracks} total={stats.totalTracks} />
             <div className="flex items-center justify-between text-[11px] text-zinc-500">
-              <span>{artist.albums?.length || 0} releases</span>
+              <span>{stats.releasedReleases} releases</span>
               <span>{formatTotalDuration(stats.totalDuration)}</span>
               {Object.entries(stats.recordTypes).length > 1 && (
                 <span>
@@ -664,6 +691,10 @@ export default function ArtistDetail() {
               {missingOnly && !trackFilter ? 'No releases with missing tracks' : 'No matching albums or tracks'}
             </p>
           )}
+          {upcomingAlbums.length > 0 && renderAlbumGroup(
+            { type: 'upcoming', label: 'Upcoming', albums: upcomingAlbums },
+            artist.provider,
+          )}
           {albumGroups.filter((g) => PRIMARY_TYPES.has(g.type)).map((g) => renderAlbumGroup(g, artist.provider))}
           {(() => {
             const moreGroups = albumGroups.filter((g) => !PRIMARY_TYPES.has(g.type));
@@ -716,9 +747,15 @@ export default function ArtistDetail() {
   }
 
   function renderAlbumGroup(group: { type: string; label: string; albums: Album[] }, artistProvider: string) {
+    // Section headers appear whenever there's more than one section — the
+    // upcoming group counts as a section too, and always shows its header so
+    // future-dated releases can't be mistaken for released ones.
+    const manySections =
+      albumGroups.length + (upcomingAlbums.length > 0 ? 1 : 0) > 1 ||
+      group.type === 'upcoming';
     return (
             <div key={group.type}>
-              {albumGroups.length > 1 && (
+              {manySections && (
                 <button
                   onClick={() => setCollapsed((c) => ({ ...(c ?? {}), [group.type]: !c?.[group.type] }))}
                   className="w-full flex items-center gap-1.5 mt-3 mb-1.5 first:mt-0 text-left"
@@ -735,7 +772,7 @@ export default function ArtistDetail() {
                   <span className="text-[11px] text-zinc-600">· {group.albums.length}</span>
                 </button>
               )}
-              {!(albumGroups.length > 1 && collapsed?.[group.type]) && (
+              {!(manySections && collapsed?.[group.type]) && (
               <div className="space-y-1">
                 {group.albums.map((album) => (
               <Link
@@ -762,7 +799,10 @@ export default function ArtistDetail() {
                     )}
                   </div>
                   <p className="text-[11px] text-zinc-500">
-                    {album.year && `${album.year} · `}{album.tracks?.length || 0} tracks
+                    {group.type === 'upcoming' && album.release_date
+                      ? `${album.release_date} · `
+                      : album.year ? `${album.year} · ` : ''}
+                    {album.tracks?.length || 0} tracks
                     {trackFilter && album.tracks && (() => {
                       const q = trackFilter.toLowerCase();
                       const count = album.tracks.filter((t) => t.title.toLowerCase().includes(q)).length;

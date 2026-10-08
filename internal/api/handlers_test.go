@@ -2647,6 +2647,61 @@ func TestLargeLibraryCooldownAtScale(t *testing.T) {
 	}
 }
 
+// Wanted listings used for queueing skip tracks on unreleased albums —
+// unreleased music can't exist on peers, so searching is futile. The
+// per-album listing stays unfiltered (explicit user action).
+func TestWantedTracksSkipsUnreleased(t *testing.T) {
+	env := newTestEnv(t)
+	q := env.queries
+
+	artist := models.Artist{Name: "Future", Provider: "test", ProviderID: "a-fut", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(&artist); err != nil {
+		t.Fatal(err)
+	}
+	future, past := "2999-01-01", "2000-01-01"
+	for i, date := range []*string{&future, &past, nil} {
+		al := models.Album{
+			ArtistID: artist.ID, Title: fmt.Sprintf("Album %d", i),
+			Provider: "test", ProviderID: fmt.Sprintf("al-fut-%d", i),
+			RecordType: "album", ReleaseDate: date, Status: models.AlbumStatusWatched,
+		}
+		if err := q.CreateAlbum(&al); err != nil {
+			t.Fatal(err)
+		}
+		tr := models.Track{
+			AlbumID: al.ID, Title: fmt.Sprintf("Song %d", i), TrackNumber: 1,
+			Provider: "test", ProviderID: fmt.Sprintf("t-fut-%d", i), Status: models.TrackStatusWanted,
+		}
+		if err := q.CreateTrack(&tr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := q.ListWantedTracks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Errorf("expected 2 wanted tracks (unreleased excluded), got %d", len(all))
+	}
+
+	byArtist, err := q.ListWantedTracksByArtist(artist.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byArtist) != 2 {
+		t.Errorf("expected 2 artist tracks, got %d", len(byArtist))
+	}
+
+	cooled, err := q.ListWantedTracksWithCooldown("2000-01-01T00:00:00Z", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cooled) != 2 {
+		t.Errorf("expected 2 cooled tracks, got %d", len(cooled))
+	}
+}
+
 func TestLargeLibrarySearchResults(t *testing.T) {
 	env := newTestEnv(t)
 	seedLargeLibrary(t, env.queries, 40, 5, 20) // 4000 tracks, titles like "Song 000-00-00"

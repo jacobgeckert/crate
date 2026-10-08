@@ -707,6 +707,11 @@ func (q *Queries) ListWantedTracks() ([]models.Track, error) {
 	return q.ListWantedTracksLimited(0)
 }
 
+// wantedReleaseClause excludes tracks on albums whose release date hasn't
+// arrived yet — unreleased music can't exist on peers, so searching for it is
+// futile. Partial dates compare lexicographically ("2026" > today ⇒ upcoming).
+const wantedReleaseClause = ` AND (al.release_date IS NULL OR al.release_date <= date('now'))`
+
 func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
@@ -715,7 +720,7 @@ func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 	          FROM tracks t
 	          JOIN albums al ON al.id = t.album_id
 	          JOIN artists ar ON ar.id = al.artist_id
-	          WHERE t.status = 'wanted'
+	          WHERE t.status = 'wanted'` + wantedReleaseClause + `
 	          ORDER BY ar.name, al.year, t.disc_number, t.track_number`
 	var args []any
 	if limit > 0 {
@@ -738,7 +743,7 @@ func (q *Queries) ListWantedTracksWithCooldown(cooldownCutoff string, limit int)
 	          FROM tracks t
 	          JOIN albums al ON al.id = t.album_id
 	          JOIN artists ar ON ar.id = al.artist_id
-	          WHERE t.status = 'wanted'
+	          WHERE t.status = 'wanted'` + wantedReleaseClause + `
 	            AND NOT EXISTS (
 	              SELECT 1 FROM download_queue d
 	              WHERE d.track_id = t.id AND d.status = 'failed'
@@ -782,7 +787,7 @@ func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, erro
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
-		 WHERE t.status = 'wanted' AND al.artist_id = ?
+		 WHERE t.status = 'wanted' AND al.artist_id = ?` + wantedReleaseClause + `
 		 ORDER BY al.year, t.disc_number, t.track_number`, artistID,
 	)
 	if err != nil {
