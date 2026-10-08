@@ -20,6 +20,7 @@ export default function AlbumDetail() {
   const [splitMode, setSplitMode] = useState(false);
   const [splitSel, setSplitSel] = useState<Set<number>>(new Set());
   const [splitRelease, setSplitRelease] = useState('');
+  const [splitLink, setSplitLink] = useState('');
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', id],
@@ -154,8 +155,8 @@ export default function AlbumDetail() {
   });
 
   const splitTracks = useMutation({
-    mutationFn: ({ releaseId, trackIds }: { releaseId: string; trackIds: number[] }) =>
-      api.splitAlbumTracks(Number(id), releaseId, trackIds),
+    mutationFn: ({ releaseId, url, trackIds }: { releaseId: string; url: string; trackIds: number[] }) =>
+      api.splitAlbumTracks(Number(id), releaseId, trackIds, url || undefined),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['album'] });
       queryClient.invalidateQueries({ queryKey: ['artist'] });
@@ -334,6 +335,7 @@ export default function AlbumDetail() {
     setSplitMode(false);
     setSplitSel(new Set());
     setSplitRelease('');
+    setSplitLink('');
   };
 
   const wantedTracks = useMemo(
@@ -524,7 +526,7 @@ export default function AlbumDetail() {
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Tracks</p>
-            {splitTargets.length > 0 && (
+            {(splitTargets.length > 0 || album.provider === 'musicbrainz') && (
               <button
                 onClick={() => (splitMode ? exitSplitMode() : setSplitMode(true))}
                 className="px-2 py-0.5 rounded text-[10px] font-medium uppercase text-zinc-500 bg-zinc-800 active:bg-zinc-700 transition-colors"
@@ -802,34 +804,53 @@ export default function AlbumDetail() {
             })}
           </div>
           {splitMode && (
-            <div className="flex items-center gap-2 mt-2 bg-zinc-800/60 rounded-lg px-3 py-2">
-              <span className="text-xs text-zinc-400 shrink-0">{splitSel.size} selected</span>
-              <select
-                value={splitRelease}
-                onChange={(e) => setSplitRelease(e.target.value)}
-                className="flex-1 min-w-0 h-7 text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5"
-              >
-                <option value="">Move to release…</option>
-                {splitTargets.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
-                    {e.track_count ? ` (${e.track_count} tracks)` : ''}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => splitTracks.mutate({ releaseId: splitRelease, trackIds: [...splitSel] })}
-                disabled={splitSel.size === 0 || !splitRelease || splitTracks.isPending}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white active:bg-blue-700 transition-colors disabled:opacity-40 shrink-0"
-              >
-                {splitTracks.isPending ? 'Splitting…' : 'Split'}
-              </button>
-              <button
-                onClick={exitSplitMode}
-                className="px-2 py-1.5 rounded-lg text-xs text-zinc-500 active:text-zinc-300 transition-colors shrink-0"
-              >
-                Cancel
-              </button>
+            <div className="mt-2 bg-zinc-800/60 rounded-lg px-3 py-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400 shrink-0">{splitSel.size} selected</span>
+                <select
+                  value={splitRelease}
+                  onChange={(e) => setSplitRelease(e.target.value)}
+                  className="flex-1 min-w-0 h-7 text-[11px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5"
+                >
+                  <option value="">Move to release…</option>
+                  {splitTargets.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {[e.date || '?', e.country, e.status, e.disambiguation].filter(Boolean).join(' · ')}
+                      {e.track_count ? ` (${e.track_count} tracks)` : ''}
+                    </option>
+                  ))}
+                  {album.provider === 'musicbrainz' && (
+                    <option value="__link">Other release — paste MusicBrainz link…</option>
+                  )}
+                </select>
+                <button
+                  onClick={() => splitTracks.mutate({
+                    releaseId: splitRelease === '__link' ? '' : splitRelease,
+                    url: splitRelease === '__link' ? splitLink : '',
+                    trackIds: [...splitSel],
+                  })}
+                  disabled={splitSel.size === 0 || !splitRelease || (splitRelease === '__link' && !splitLink.trim()) || splitTracks.isPending}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white active:bg-blue-700 transition-colors disabled:opacity-40 shrink-0"
+                >
+                  {splitTracks.isPending ? 'Splitting…' : 'Split'}
+                </button>
+                <button
+                  onClick={exitSplitMode}
+                  className="px-2 py-1.5 rounded-lg text-xs text-zinc-500 active:text-zinc-300 transition-colors shrink-0"
+                >
+                  Cancel
+                </button>
+              </div>
+              {splitRelease === '__link' && (
+                <input
+                  type="text"
+                  value={splitLink}
+                  onChange={(e) => setSplitLink(e.target.value)}
+                  placeholder="https://musicbrainz.org/release/…"
+                  className="w-full bg-zinc-900 rounded-lg px-3 py-1.5 text-xs placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
+                  autoFocus
+                />
+              )}
             </div>
           )}
         </div>

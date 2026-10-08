@@ -233,10 +233,27 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		ReleaseID string  `json:"release_id"`
+		URL       string  `json:"url"`
 		TrackIDs  []int64 `json:"track_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ReleaseID == "" || len(req.TrackIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "release_id and track_ids are required")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.TrackIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "release_id or url, and track_ids are required")
+		return
+	}
+	// The target is either an edition id from the picker or a pasted
+	// MusicBrainz link — any release on the provider, not just this album's
+	// release-group.
+	targetID := req.ReleaseID
+	if targetID == "" && req.URL != "" {
+		mbid, perr := parseMusicBrainzLink(req.URL)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, perr.Error())
+			return
+		}
+		targetID = mbid
+	}
+	if targetID == "" {
+		writeError(w, http.StatusBadRequest, "release_id or url is required")
 		return
 	}
 	album, err := s.queries.GetAlbum(id)
@@ -252,20 +269,20 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "album is not linked to a provider")
 		return
 	}
-	if album.ProviderID == req.ReleaseID {
+	if album.ProviderID == targetID {
 		writeError(w, http.StatusConflict, "album is already that release")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	detail, err := s.providers.GetAlbum(ctx, album.Provider, req.ReleaseID)
+	detail, err := s.providers.GetAlbum(ctx, album.Provider, targetID)
 	if err != nil || detail == nil {
 		writeError(w, http.StatusBadGateway, "provider fetch failed")
 		return
 	}
 
-	target, err := s.queries.FindAlbumByProvider(album.Provider, req.ReleaseID)
+	target, err := s.queries.FindAlbumByProvider(album.Provider, targetID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "failed to look up release album")
 		return
@@ -284,11 +301,18 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 			Title:      title,
 			Year:       intPtrOrNil(year),
 			Provider:   album.Provider,
-			ProviderID: req.ReleaseID,
-			ReleaseID:  &req.ReleaseID,
+			ProviderID: detail.Id,
 			CoverURL:   strPtrOrNil(detail.CoverUrl),
 			RecordType: album.RecordType,
 			Status:     album.Status,
+		}
+		if rt := detail.Metadata["record_type"]; rt != "" {
+			target.RecordType = rt
+		}
+		// A release target is pinned (release-keyed, like a manually added
+		// release); a release-group target stays unpinned.
+		if relID := detail.Metadata["release_id"]; relID != "" {
+			target.ReleaseID = &relID
 		}
 		if err := s.queries.CreateAlbum(target); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create album")
@@ -385,7 +409,7 @@ func (s *Server) handleSplitTracks(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("split: source tracklist refresh failed", "album", album.Title, "error", err)
 	}
 
-	slog.Info("split: moved tracks to release album", "album", album.Title, "release_id", req.ReleaseID,
+	slog.Info("split: moved tracks to release album", "album", album.Title, "release_id", targetID,
 		"target", target.ID, "moved", moved, "relocated", relocated, "added", added, "restored", restored)
 	s.activityLog.Record("album_split", "album", target.ID, fmt.Sprintf(
 		"Split %d track(s) from %s into %s — %d file(s) relocated, %d added, %d restored",

@@ -108,10 +108,10 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ release_id: releaseId }),
     }),
-  splitAlbumTracks: (id: number, releaseId: string, trackIds: number[]) =>
+  splitAlbumTracks: (id: number, releaseId: string, trackIds: number[], url?: string) =>
     request<{ album_id: number; moved: number; relocated: number; added: number; restored: number }>(`/albums/${id}/split-tracks`, {
       method: 'POST',
-      body: JSON.stringify({ release_id: releaseId, track_ids: trackIds }),
+      body: JSON.stringify({ release_id: releaseId, url, track_ids: trackIds }),
     }),
   ignoreAlbum: (id: number) =>
     request<void>(`/albums/${id}/ignore`, { method: 'PUT' }),

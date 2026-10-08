@@ -237,6 +237,7 @@ func (f *fakeProvider) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb
 				{Id: "5001", Title: "Track B2 (instrumental)", TrackNumber: 2, DiscNumber: 1, DurationMs: 200000, Rank: 2,
 					Metadata: map[string]string{"recording_id": "rec-b2-inst"}},
 			},
+			Metadata: map[string]string{"release_id": "rel-2001-inst", "release_group_id": "2001"},
 		}, nil
 	// MusicBrainz-id-shaped albums for the manual add-release flow — the
 	// handler only accepts UUID-shaped ids.
@@ -1148,6 +1149,74 @@ func TestRefreshRevertsMissingFiles(t *testing.T) {
 	got2, _ := env.queries.GetTrack(a2.ID)
 	if got2.Status != models.TrackStatusWanted {
 		t.Errorf("Track A2 status = %s, want wanted (file deleted)", got2.Status)
+	}
+}
+
+// TestSplitTracksByURL: the split target can be a pasted MusicBrainz link —
+// a release link creates a release-keyed album, a release-group link a normal
+// unpinned album.
+func TestSplitTracksByURL(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	var two *models.Album
+	for i := range albums {
+		if albums[i].ProviderID == "2001" {
+			two = &albums[i]
+		}
+	}
+	if two == nil {
+		t.Fatal("Album Two not found")
+	}
+	srcTracks, _ := env.queries.ListTracksByAlbum(two.ID)
+	if len(srcTracks) == 0 {
+		t.Fatal("no source tracks")
+	}
+
+	// Release link → release-keyed target.
+	body := fmt.Sprintf(`{"url":"https://musicbrainz.org/release/a1a1a1a1-0000-0000-0000-000000000002","track_ids":[%d]}`, srcTracks[0].ID)
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/split-tracks", two.ID), body)
+	if w.Code != 200 {
+		t.Fatalf("split by url: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	res := decode[struct {
+		AlbumID int64 `json:"album_id"`
+		Moved   int   `json:"moved"`
+	}](t, w)
+	if res.Moved != 1 {
+		t.Errorf("moved = %d, want 1", res.Moved)
+	}
+	target, _ := env.queries.GetAlbum(res.AlbumID)
+	if target.ProviderID != "a1a1a1a1-0000-0000-0000-000000000002" || target.ReleaseID == nil {
+		t.Errorf("release target = provider:%s release:%v, want release-keyed", target.ProviderID, target.ReleaseID)
+	}
+
+	// Release-group link → group-keyed target, no pin.
+	srcTracks, _ = env.queries.ListTracksByAlbum(two.ID)
+	if len(srcTracks) == 0 {
+		t.Fatal("source tracks not restored after first split")
+	}
+	body = fmt.Sprintf(`{"url":"https://musicbrainz.org/release-group/a1a1a1a1-0000-0000-0000-000000000001","track_ids":[%d]}`, srcTracks[0].ID)
+	w = env.do("POST", fmt.Sprintf("/api/albums/%d/split-tracks", two.ID), body)
+	if w.Code != 200 {
+		t.Fatalf("split by group url: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	res = decode[struct {
+		AlbumID int64 `json:"album_id"`
+		Moved   int   `json:"moved"`
+	}](t, w)
+	target, _ = env.queries.GetAlbum(res.AlbumID)
+	if target.ProviderID != "a1a1a1a1-0000-0000-0000-000000000001" || target.ReleaseID != nil {
+		t.Errorf("group target = provider:%s release:%v, want group-keyed unpinned", target.ProviderID, target.ReleaseID)
+	}
+
+	// Bad link → 400.
+	srcTracks, _ = env.queries.ListTracksByAlbum(two.ID)
+	body = fmt.Sprintf(`{"url":"https://bandcamp.com/x","track_ids":[%d]}`, srcTracks[0].ID)
+	if w := env.do("POST", fmt.Sprintf("/api/albums/%d/split-tracks", two.ID), body); w.Code != 400 {
+		t.Errorf("bad url: expected 400, got %d", w.Code)
 	}
 }
 
