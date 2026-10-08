@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate } from '../types/index';
 
 const BASE = '/api';
 
@@ -92,6 +92,14 @@ export const api = {
     request<{ updated: number }>(`/artists/new-releases`, {
       method: 'PUT',
       body: JSON.stringify({ ids, enabled }),
+    }),
+
+  getArtistImageCandidates: (id: number) =>
+    request<{ candidates: ArtistImageCandidate[] }>(`/artists/${id}/images`),
+  setArtistImage: (id: number, imageUrl: string) =>
+    request<{ ok: boolean }>(`/artists/${id}/image`, {
+      method: 'PUT',
+      body: JSON.stringify({ image_url: imageUrl }),
     }),
 
   unwatchArtist: (id: number) =>

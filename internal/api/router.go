@@ -124,6 +124,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/sync", s.handleSyncStatus)
 			r.Post("/refresh", s.handleBulkRefreshArtists)
 			r.Get("/{id}", s.handleGetArtist)
+			r.Get("/{id}/images", s.handleArtistImageCandidates)
+			r.Put("/{id}/image", s.handleSetArtistImage)
 			r.Put("/new-releases", s.handleBulkNewReleases)
 			r.Put("/{id}/new-releases", s.handleToggleNewReleases)
 			r.Put("/{id}/release-types", s.handleSetArtistReleaseTypes)

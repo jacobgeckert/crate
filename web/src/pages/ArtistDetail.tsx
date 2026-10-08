@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
 import { formatTotalDuration, providerArtistUrl } from '../lib/format';
+import DetailSheet from '../components/DetailSheet';
 import FilterBar from '../components/FilterBar';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
@@ -45,6 +46,12 @@ function isUpcoming(album: Album): boolean {
   return (album.year ?? 0) > Number(today.slice(0, 4));
 }
 
+// Deezer CDN URLs carry a WxH size segment — swap it for the largest variant
+// when enlarging. Other providers' URLs pass through unchanged.
+function enlargeImageUrl(url: string): string {
+  return url.replace(/\/\d+x\d+-/, '/1000x1000-');
+}
+
 const ALBUM_TYPE_LABELS: Record<string, string> = {
   album: 'Albums',
   ep: 'EPs',
@@ -78,6 +85,8 @@ export default function ArtistDetail() {
   // After linking a local artist the reconcile runs in the background; poll the
   // artist so its discography fills in live instead of waiting for a reload.
   const [reconciling, setReconciling] = useState(false);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [showImageEnlarge, setShowImageEnlarge] = useState(false);
   const lastAlbumCount = useRef(-1);
   const reconcileTicks = useRef(0);
   const stableTicks = useRef(0);
@@ -102,6 +111,22 @@ export default function ArtistDetail() {
   // Server-reported sync is device-independent — a refresh started on another
   // device shows here too once the ambient poll sees it.
   const syncing = reconciling || !!artist?.sync?.active;
+
+  const { data: imageCandidates, isLoading: imageCandidatesLoading } = useQuery({
+    queryKey: ['artist-images', id],
+    queryFn: () => api.getArtistImageCandidates(Number(id)),
+    enabled: showImagePicker,
+  });
+
+  const setImage = useMutation({
+    mutationFn: (url: string) => api.setArtistImage(Number(id), url),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['artist', id] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      setShowImagePicker(false);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
 
   const { data: providers } = useQuery({
     queryKey: ['providers'],
@@ -401,7 +426,7 @@ export default function ArtistDetail() {
       )}
 
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-14 h-14 rounded-full bg-zinc-800 overflow-hidden shrink-0">
+        <div className="relative w-14 h-14 rounded-full bg-zinc-800 overflow-hidden shrink-0 group">
           {artist.image_url ? (
             <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" />
           ) : (
@@ -409,6 +434,35 @@ export default function ArtistDetail() {
               <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
             </div>
           )}
+          {artist.image_url && (
+            <button
+              onClick={() => setShowImageEnlarge(true)}
+              className="absolute inset-0"
+              aria-label={`Enlarge ${artist.name} image`}
+            />
+          )}
+          <div className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/60 opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity pointer-events-none">
+            {artist.image_url && (
+              <button
+                onClick={() => setShowImageEnlarge(true)}
+                className="p-1 text-zinc-200 hover:text-white pointer-events-auto"
+                title="Enlarge image"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /><path d="M11 8v6" /><path d="M8 11h6" />
+                </svg>
+              </button>
+            )}
+            <button
+              onClick={() => setShowImagePicker(true)}
+              className="p-1 text-zinc-200 hover:text-white pointer-events-auto"
+              title="Pick a different image"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-bold truncate">{artist.name}</h2>
@@ -728,6 +782,68 @@ export default function ArtistDetail() {
           })()}
         </div>
       )}
+
+      {showImageEnlarge && artist.image_url && (
+        <div
+          className="fixed inset-0 z-[95] flex flex-col items-center justify-center bg-black/90 p-4"
+          onClick={() => setShowImageEnlarge(false)}
+        >
+          <img
+            src={enlargeImageUrl(artist.image_url)}
+            alt={artist.name}
+            className="max-w-full max-h-[75vh] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+            onError={(e) => { (e.target as HTMLImageElement).src = artist.image_url!; }}
+          />
+          <div className="flex gap-2 mt-4" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => { setShowImageEnlarge(false); setShowImagePicker(true); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-300 active:bg-zinc-700 transition-colors"
+            >
+              Change image
+            </button>
+            <button
+              onClick={() => setShowImageEnlarge(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-zinc-700 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      <DetailSheet open={showImagePicker} onClose={() => setShowImagePicker(false)} title={`Pick image — ${artist.name}`}>
+        {imageCandidatesLoading && (
+          <p className="text-xs text-zinc-500 py-4 text-center">Searching providers…</p>
+        )}
+        {!imageCandidatesLoading && (imageCandidates?.candidates.length ?? 0) === 0 && (
+          <p className="text-xs text-zinc-500 py-4 text-center">No artist images found on any provider.</p>
+        )}
+        <div className="grid grid-cols-3 gap-2">
+          {imageCandidates?.candidates.map((c) => (
+            <button
+              key={c.image_url}
+              onClick={() => setImage.mutate(c.image_url)}
+              disabled={setImage.isPending}
+              className="relative aspect-square rounded-lg overflow-hidden bg-zinc-800 disabled:opacity-50"
+            >
+              <img src={c.image_url} alt={c.name} className="w-full h-full object-cover" />
+              <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-zinc-300 truncate px-1 py-0.5">
+                {c.name} · {c.provider}
+              </span>
+            </button>
+          ))}
+        </div>
+        {artist.image_url && (
+          <button
+            onClick={() => setImage.mutate('')}
+            disabled={setImage.isPending}
+            className="mt-3 w-full text-xs text-red-400 bg-zinc-800 rounded-lg py-2 active:bg-zinc-700 transition-colors disabled:opacity-50"
+          >
+            Remove image
+          </button>
+        )}
+      </DetailSheet>
     </div>
   );
 

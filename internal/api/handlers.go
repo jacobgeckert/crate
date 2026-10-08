@@ -667,6 +667,83 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, artist)
 }
 
+// handleArtistImageCandidates searches every healthy provider for the watched
+// artist's name and returns the distinct artist image URLs found, so the user
+// can correct an auto-picked photo. Local providers are skipped — they never
+// serve images.
+func (s *Server) handleArtistImageCandidates(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	artist, err := s.queries.GetArtist(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get artist")
+		return
+	}
+
+	type candidate struct {
+		Name     string `json:"name"`
+		ImageURL string `json:"image_url"`
+		Provider string `json:"provider"`
+	}
+	out := []candidate{}
+	seen := map[string]bool{}
+	for _, p := range s.providers.ListProviders() {
+		if !p.Healthy || p.Name == provider.LocalProvider {
+			continue
+		}
+		res, err := s.providers.SearchWithProvider(r.Context(), p.Name, artist.Name, 10, 0)
+		if err != nil {
+			continue
+		}
+		for _, a := range res.Artists {
+			if a.ImageUrl == "" || seen[a.ImageUrl] {
+				continue
+			}
+			seen[a.ImageUrl] = true
+			out = append(out, candidate{Name: a.Name, ImageURL: a.ImageUrl, Provider: p.Name})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
+}
+
+// handleSetArtistImage sets (or clears, with an empty URL) a watched artist's
+// image — the manual override for the Deezer auto-pick.
+func (s *Server) handleSetArtistImage(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		ImageURL string `json:"image_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	u := strings.TrimSpace(req.ImageURL)
+	if u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		writeError(w, http.StatusBadRequest, "image_url must be an http(s) URL")
+		return
+	}
+	if _, err := s.queries.GetArtist(id); errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	if err := s.queries.SetArtistImageURL(id, u); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set image")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {

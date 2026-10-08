@@ -1280,6 +1280,57 @@ func TestArtistRefreshActivityLogged(t *testing.T) {
 	}
 }
 
+// TestArtistImagePicker: candidates come from healthy providers' artist
+// search (blank images skipped), and PUT image sets/clears artist.image_url.
+func TestArtistImagePicker(t *testing.T) {
+	env := newTestEnv(t)
+
+	artist := models.Artist{Name: "Test Artist", Provider: "test", ProviderID: "1000", Status: models.ArtistStatusWatched}
+	if err := env.queries.CreateArtist(&artist); err != nil {
+		t.Fatal(err)
+	}
+
+	w := env.do("GET", fmt.Sprintf("/api/artists/%d/images", artist.ID), "")
+	if w.Code != 200 {
+		t.Fatalf("images: expected 200, got %d", w.Code)
+	}
+	resp := decode[struct {
+		Candidates []struct {
+			ImageURL string `json:"image_url"`
+			Provider string `json:"provider"`
+		} `json:"candidates"`
+	}](t, w)
+	if len(resp.Candidates) != 2 {
+		t.Fatalf("expected 2 candidates (blank image skipped), got %d", len(resp.Candidates))
+	}
+	if resp.Candidates[0].ImageURL != "http://img/artist.jpg" || resp.Candidates[0].Provider != "test" {
+		t.Errorf("unexpected candidate: %+v", resp.Candidates[0])
+	}
+
+	w = env.do("PUT", fmt.Sprintf("/api/artists/%d/image", artist.ID), `{"image_url":"http://img/artist2.jpg"}`)
+	if w.Code != 200 {
+		t.Fatalf("set image: expected 200, got %d", w.Code)
+	}
+	got, _ := env.queries.GetArtist(artist.ID)
+	if got.ImageURL == nil || *got.ImageURL != "http://img/artist2.jpg" {
+		t.Fatalf("image_url = %v, want artist2", got.ImageURL)
+	}
+
+	w = env.do("PUT", fmt.Sprintf("/api/artists/%d/image", artist.ID), `{"image_url":"javascript:x"}`)
+	if w.Code != 400 {
+		t.Fatalf("bad url: expected 400, got %d", w.Code)
+	}
+
+	w = env.do("PUT", fmt.Sprintf("/api/artists/%d/image", artist.ID), `{"image_url":""}`)
+	if w.Code != 200 {
+		t.Fatalf("clear: expected 200, got %d", w.Code)
+	}
+	got, _ = env.queries.GetArtist(artist.ID)
+	if got.ImageURL != nil && *got.ImageURL != "" {
+		t.Errorf("image_url should be cleared, got %q", *got.ImageURL)
+	}
+}
+
 // TestSplitTracksByURL: the split target can be a pasted MusicBrainz link —
 // a release link creates a release-keyed album, a release-group link a normal
 // unpinned album.

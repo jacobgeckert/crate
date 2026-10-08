@@ -364,3 +364,9 @@ export interface ConcertsResponse {
   configured: boolean;
   shows: Show[];
 }
+
+export interface ArtistImageCandidate {
+  name: string;
+  image_url: string;
+  provider: string;
+}
