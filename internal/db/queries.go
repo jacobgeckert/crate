@@ -328,11 +328,11 @@ func (q *Queries) SetAlbumReleaseID(id int64, releaseID *string) error {
 func (q *Queries) GetAlbum(id int64) (*models.Album, error) {
 	a := &models.Album{}
 	err := q.db.QueryRow(
-		`SELECT al.id, al.artist_id, al.title, al.year, al.provider, al.provider_id, al.cover_url, al.record_type, al.release_id, al.status,
+		`SELECT al.id, al.artist_id, al.title, al.year, al.provider, al.provider_id, al.cover_url, al.record_type, al.release_date, al.release_id, al.status,
 		        al.created_at, al.updated_at, ar.name
 		 FROM albums al JOIN artists ar ON ar.id = al.artist_id
 		 WHERE al.id = ?`, id,
-	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseID, &a.Status,
+	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseDate, &a.ReleaseID, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt, &a.ArtistName)
 	if err != nil {
 		return nil, err
@@ -342,7 +342,7 @@ func (q *Queries) GetAlbum(id int64) (*models.Album, error) {
 
 func (q *Queries) ListAlbumsByArtist(artistID int64) ([]models.Album, error) {
 	rows, err := q.db.Query(
-		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, release_id, status, created_at, updated_at
+		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, release_date, release_id, status, created_at, updated_at
 		 FROM albums WHERE artist_id = ? ORDER BY year, title`, artistID,
 	)
 	if err != nil {
@@ -354,7 +354,7 @@ func (q *Queries) ListAlbumsByArtist(artistID int64) ([]models.Album, error) {
 	for rows.Next() {
 		var a models.Album
 		if err := rows.Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType,
-			&a.ReleaseID, &a.Status, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.ReleaseDate, &a.ReleaseID, &a.Status, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		albums = append(albums, a)
