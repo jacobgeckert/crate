@@ -236,6 +236,7 @@ export default function Library() {
 
   return (
     <div className="relative">
+      <div className="sticky top-0 z-30 -mx-4 bg-zinc-950 px-4 pt-1 pb-2">
       <h2 className="text-lg font-bold mb-3">Watchlist</h2>
 
       <div className="flex items-start gap-2">
@@ -275,6 +276,7 @@ export default function Library() {
           ))}
         </div>
       </div>
+      </div>
 
       {sort === 'az' && <AlphabetRail activeLetters={activeLetters} />}
 
@@ -297,7 +299,7 @@ export default function Library() {
         {sort === 'az' && grouped.map(({ letter, artists: group }) => (
           <div key={letter} id={`section-${letter}`}>
             {grouped.length > 1 && (
-              <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1 first:mt-0 scroll-mt-4">
+              <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1 first:mt-0 scroll-mt-24">
                 {letter}
               </p>
             )}
