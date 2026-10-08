@@ -70,6 +70,12 @@ export default function Library() {
     () => [...filteredArtists].sort((a, b) => b.created_at.localeCompare(a.created_at) || a.name.localeCompare(b.name)),
     [filteredArtists],
   );
+  // Display order for shift-click range selection — grouped re-sorts for A–Z,
+  // so the id sequence has to come from the rendered list, not filteredArtists.
+  const displayOrder = useMemo(
+    () => (sort === 'recent' ? recentArtists : grouped.flatMap((g) => g.artists)).map((a) => a.id),
+    [sort, recentArtists, grouped],
+  );
   const setSortPersist = (s: LibrarySort) => {
     setSort(s);
     sessionStorage.setItem('library-sort', s);
@@ -143,10 +149,35 @@ export default function Library() {
     });
   };
 
+  // Anchor for shift+click range selection — the last plain-clicked artist in
+  // display order. Shift+click adds every artist between anchor and target.
+  const lastClicked = useRef<number | null>(null);
+  useEffect(() => {
+    if (!selecting) lastClicked.current = null;
+  }, [selecting]);
+
+  const handleSelect = (id: number, shift: boolean) => {
+    if (shift && lastClicked.current != null) {
+      const from = displayOrder.indexOf(lastClicked.current);
+      const to = displayOrder.indexOf(id);
+      if (from >= 0 && to >= 0) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const artistId of displayOrder.slice(lo, hi + 1)) next.add(artistId);
+          return next;
+        });
+        return; // anchor stays on the last plain click
+      }
+    }
+    toggleSelect(id);
+    lastClicked.current = id;
+  };
+
   const rowProps = (artist: Artist) => ({
     selecting,
     selected: selected.has(artist.id),
-    onSelect: () => toggleSelect(artist.id),
+    onSelect: (e: { shiftKey: boolean }) => handleSelect(artist.id, e.shiftKey),
   });
 
   const scrollRestored = useRef(false);
@@ -371,7 +402,7 @@ function ArtistRow({
   addedLabel?: string;
   selecting?: boolean;
   selected?: boolean;
-  onSelect?: () => void;
+  onSelect?: (e: { shiftKey: boolean }) => void;
 }) {
   const inner = (
     <>
@@ -379,8 +410,11 @@ function ArtistRow({
         <input
           type="checkbox"
           checked={!!selected}
-          onChange={onSelect}
-          onClick={(e) => e.stopPropagation()}
+          readOnly
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect?.(e);
+          }}
           className="accent-emerald-500 shrink-0"
         />
       )}
