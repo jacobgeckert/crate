@@ -16,6 +16,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/cache"
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/concerts"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/organizer"
@@ -33,6 +34,7 @@ type Server struct {
 	reject      *reject.Service
 	uploads     *upload.Service
 	organizer   *organizer.Service
+	concerts    *concerts.Service
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
@@ -65,6 +67,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		reject:      reject.NewService(queries, libraryDir, actLog),
 		uploads:     up,
 		organizer:   org,
+		concerts:    concerts.NewService(queries, c),
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,
@@ -131,6 +134,7 @@ func (s *Server) setupRouter() chi.Router {
 		})
 
 		r.Get("/releases/upcoming", s.handleUpcomingReleases)
+		r.Get("/concerts", s.handleGetConcerts)
 
 		r.Route("/albums", func(r chi.Router) {
 			r.Get("/{id}", s.handleGetAlbum)

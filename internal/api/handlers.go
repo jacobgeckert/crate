@@ -1417,6 +1417,7 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 var sensitiveSettings = map[string]bool{
 	"navidrome_password":    true,
 	"music_assistant_token": true,
+	"ticketmaster_api_key":  true,
 }
 
 var hiddenSettings = map[string]bool{

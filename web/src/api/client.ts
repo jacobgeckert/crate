@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse } from '../types/index';
 
 const BASE = '/api';
 
@@ -83,6 +83,8 @@ export const api = {
       body: JSON.stringify({ url }),
     }),
   getUpcomingReleases: () => request<Album[]>('/releases/upcoming'),
+  getConcerts: (refresh = false) =>
+    request<ConcertsResponse>(`/concerts${refresh ? '?refresh=1' : ''}`),
   refreshArtists: (ids: number[]) =>
     request<{ queued: number; ids: number[] }>(`/artists/refresh`, { method: 'POST', body: JSON.stringify({ ids }) }),
   getSyncStatus: () => request<{ items: ArtistSyncStatus[] }>('/artists/sync'),

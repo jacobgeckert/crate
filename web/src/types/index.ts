@@ -345,3 +345,22 @@ export interface ArtistSyncStatus {
   done: number;
   current?: string;
 }
+
+export interface Show {
+  event_id: string;
+  event_name: string;
+  artist_id?: number;
+  artist_name: string;
+  date: string;
+  time?: string;
+  venue: string;
+  city: string;
+  state?: string;
+  url: string;
+  image?: string;
+}
+
+export interface ConcertsResponse {
+  configured: boolean;
+  shows: Show[];
+}

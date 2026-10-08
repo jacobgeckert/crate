@@ -41,6 +41,15 @@ const settingsSections = [
     ],
   },
   {
+    title: 'Concerts (optional)',
+    fields: [
+      { key: 'ticketmaster_api_key', label: 'Ticketmaster API Key', placeholder: 'Discovery API consumer key', type: 'password', description: 'Free key from developer.ticketmaster.com — enables the Shows page' },
+      { key: 'concerts_postal_code', label: 'Postal Code', placeholder: '90210', description: 'Zip/postal code to search for shows around' },
+      { key: 'concerts_radius', label: 'Radius', placeholder: '50', type: 'number', description: 'Search radius around the postal code' },
+      { key: 'concerts_unit', label: 'Radius Unit', placeholder: 'miles', description: 'miles or km' },
+    ],
+  },
+  {
     title: 'Scheduling',
     fields: [
       { key: 'max_auto_queue', label: 'Max Auto-Queue Per Cycle', placeholder: '50', type: 'number', description: 'Limit how many wanted tracks the scheduler queues per cycle' },
