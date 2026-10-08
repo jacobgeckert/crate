@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { formatFileSize, formatDuration, providerAlbumUrl, providerReleaseUrl } from '../lib/format';
 import { useToast } from '../components/Toast';
 import ProviderBadge from '../components/ProviderBadge';
-import type { AlbumEdition, LibrarySearchResult, UploadAlbumRef, UploadBatch, UploadFileItem } from '../types/index';
+import type { AlbumEdition, UploadAlbumRef, UploadBatch, UploadFileItem } from '../types/index';
 
 const ACCEPT = '.mp3,.flac,.wav';
 
@@ -19,50 +19,107 @@ function ConfidenceBadge({ c }: { c: string }) {
   return <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${cls}`}>{c}</span>;
 }
 
-// Inline library-track picker for manually overriding a file's match — used
-// when identification picked the wrong track or found none.
-function FileOverridePicker({
-  seed,
-  onPick,
-}: {
-  seed: string;
-  onPick: (trackId: number) => void;
-}) {
-  const [q, setQ] = useState(seed);
-  const { data: results } = useQuery<LibrarySearchResult[]>({
-    queryKey: ['lib-search', q],
-    queryFn: () => api.searchLibrary(q),
-    enabled: q.trim().length > 0,
+// Inline drill-down picker for manually overriding a file's match: artist →
+// release → track. Used when identification picked the wrong album or found
+// none — the file commits onto the chosen library track.
+function FileOverridePicker({ onPick }: { onPick: (trackId: number) => void }) {
+  const [artistId, setArtistId] = useState<number | null>(null);
+  const [albumId, setAlbumId] = useState<number | null>(null);
+  const [q, setQ] = useState('');
+
+  const { data: artists } = useQuery({
+    queryKey: ['artists'],
+    queryFn: api.listArtists,
+    staleTime: 60_000,
   });
+  const { data: artist } = useQuery({
+    queryKey: ['artist', artistId],
+    queryFn: () => api.getArtist(artistId!),
+    enabled: artistId != null,
+  });
+
+  const pickBtn = 'w-full text-left rounded-lg px-2.5 py-1.5 bg-zinc-800/50 active:bg-zinc-700 transition-colors';
+  const backBtn = 'text-[10px] text-zinc-500 hover:text-zinc-300 uppercase tracking-wide';
+
+  // Step 3 — pick the track on the chosen release.
+  if (artistId != null && albumId != null && artist) {
+    const al = artist.albums?.find((a) => a.id === albumId);
+    return (
+      <div className="mt-1.5 space-y-1">
+        <button onClick={() => setAlbumId(null)} className={backBtn}>← {artist.name} releases</button>
+        <div className="max-h-44 overflow-y-auto space-y-0.5">
+          {(al?.tracks ?? []).map((t) => (
+            <button key={t.id} onClick={() => onPick(t.id)} className={pickBtn}>
+              <p className="text-[11px] truncate">
+                <span className="text-zinc-500 tabular-nums mr-1.5">
+                  {t.disc_number > 1 ? `${t.disc_number}-` : ''}{t.track_number}
+                </span>
+                {t.title}
+                <span className="text-zinc-600"> · {t.status}</span>
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Step 2 — pick the release under the chosen artist.
+  if (artistId != null) {
+    const albums = (artist?.albums ?? []).filter(
+      (a) => !q || a.title.toLowerCase().includes(q.toLowerCase()),
+    );
+    return (
+      <div className="mt-1.5 space-y-1">
+        <div className="flex items-center justify-between">
+          <button onClick={() => { setArtistId(null); setQ(''); }} className={backBtn}>← artists</button>
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Filter releases…"
+            className="w-40 bg-zinc-900 rounded-lg px-2.5 py-1 text-xs placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
+          />
+        </div>
+        <div className="max-h-44 overflow-y-auto space-y-0.5">
+          {albums.map((a) => (
+            <button key={a.id} onClick={() => { setAlbumId(a.id); setQ(''); }} className={pickBtn}>
+              <p className="text-[11px] truncate">
+                {a.title}
+                <span className="text-zinc-600">{a.year ? ` · ${a.year}` : ''}{a.record_type && a.record_type !== 'album' ? ` · ${a.record_type}` : ''}</span>
+              </p>
+            </button>
+          ))}
+          {artist && albums.length === 0 && <p className="text-[11px] text-zinc-600 py-1">No releases match</p>}
+        </div>
+      </div>
+    );
+  }
+
+  // Step 1 — pick the artist.
+  const filteredArtists = (artists ?? []).filter(
+    (a) => !q || a.name.toLowerCase().includes(q.toLowerCase()),
+  );
   return (
     <div className="mt-1.5 space-y-1">
       <input
         type="text"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search library tracks…"
+        placeholder="Search artists…"
         className="w-full bg-zinc-900 rounded-lg px-3 py-1.5 text-xs placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
         autoFocus
       />
-      {results && results.length > 0 && (
-        <div className="max-h-44 overflow-y-auto space-y-0.5">
-          {results.map((r) => (
-            <button
-              key={r.track_id}
-              onClick={() => onPick(r.track_id)}
-              className="w-full text-left rounded-lg px-2.5 py-1.5 bg-zinc-800/50 active:bg-zinc-700 transition-colors"
-            >
-              <p className="text-[11px] truncate">
-                <span className="text-zinc-500">{r.artist_name} — {r.album_title}</span>
-                <span className="text-zinc-300"> → {r.track_title}</span>
-              </p>
-            </button>
-          ))}
-        </div>
-      )}
-      {q.trim() && results && results.length === 0 && (
-        <p className="text-[11px] text-zinc-600 py-1">No library tracks match</p>
-      )}
+      <div className="max-h-44 overflow-y-auto space-y-0.5">
+        {filteredArtists.map((a) => (
+          <button key={a.id} onClick={() => { setArtistId(a.id); setQ(''); }} className={pickBtn}>
+            <p className="text-[11px] truncate">{a.name}</p>
+          </button>
+        ))}
+        {artists && filteredArtists.length === 0 && (
+          <p className="text-[11px] text-zinc-600 py-1">No artists match</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -126,7 +183,6 @@ function FileRow({
         {m && <div className="text-[11px] text-zinc-600 mt-0.5">{m.reason}</div>}
         {overriding && (
           <FileOverridePicker
-            seed={file.meta?.title ?? ''}
             onPick={(trackId) => {
               onOverride(file.id, trackId);
               setOverriding(false);
