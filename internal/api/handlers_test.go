@@ -162,6 +162,9 @@ func (f *fakeProvider) GetArtist(ctx context.Context, req *pb.EntityRequest) (*p
 }
 
 func (f *fakeProvider) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumList, error) {
+	if req.Id == "err" {
+		return nil, fmt.Errorf("provider exploded")
+	}
 	if req.Id == "1000" {
 		return &pb.AlbumList{
 			Albums: []*pb.AlbumSummary{
@@ -1149,6 +1152,44 @@ func TestRefreshRevertsMissingFiles(t *testing.T) {
 	got2, _ := env.queries.GetTrack(a2.ID)
 	if got2.Status != models.TrackStatusWanted {
 		t.Errorf("Track A2 status = %s, want wanted (file deleted)", got2.Status)
+	}
+}
+
+// Artist refresh lands in the activity log: a completed sync records
+// discography_sync, a provider-side failure records sync_failed instead of
+// vanishing silently.
+func TestArtistRefreshActivityLogged(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	w := env.do("POST", fmt.Sprintf("/api/artists/%d/refresh", artists[0].ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+
+	syncs, _ := env.activityLog.List(50, 0, "discography_sync")
+	if len(syncs) != 1 {
+		t.Fatalf("expected 1 discography_sync entry, got %d", len(syncs))
+	}
+	if syncs[0].EntityType != "artist" || syncs[0].EntityID != artists[0].ID {
+		t.Errorf("entry = %s/%d, want artist/%d", syncs[0].EntityType, syncs[0].EntityID, artists[0].ID)
+	}
+
+	bad := models.Artist{Name: "Broken", Provider: "test", ProviderID: "err", Status: models.ArtistStatusWatched}
+	if err := env.queries.CreateArtist(&bad); err != nil {
+		t.Fatal(err)
+	}
+	w = env.do("POST", fmt.Sprintf("/api/artists/%d/refresh", bad.ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+	failed, _ := env.activityLog.List(50, 0, "sync_failed")
+	if len(failed) != 1 {
+		t.Fatalf("expected 1 sync_failed entry, got %d", len(failed))
+	}
+	if failed[0].EntityID != bad.ID {
+		t.Errorf("sync_failed entity = %d, want %d", failed[0].EntityID, bad.ID)
 	}
 }
 

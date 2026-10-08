@@ -59,6 +59,8 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	albumList, err := s.providers.GetArtistAlbums(ctx, providerName, artistProviderID)
 	if err != nil {
 		slog.Error("sync: failed to fetch discography from provider", "artist", name, "provider", providerName, "error", err)
+		s.activityLog.Record("sync_failed", "artist", artistID, fmt.Sprintf(
+			"Discography sync failed for %s (%s): %v", name, providerName, err))
 		return
 	}
 	slog.Info("sync: provider returned releases", "artist", name, "provider", providerName, "releases", len(albumList.Albums))
@@ -68,6 +70,8 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	existing, err := s.queries.ListAlbumsByArtist(artistID)
 	if err != nil {
 		slog.Error("sync: list albums", "artist_id", artistID, "error", err)
+		s.activityLog.Record("sync_failed", "artist", artistID, fmt.Sprintf(
+			"Discography sync failed for %s: %v", name, err))
 		return
 	}
 

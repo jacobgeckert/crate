@@ -19,6 +19,7 @@ const ACTION_LABELS: Record<string, string> = {
   album_split: 'Album split',
   release_add: 'Release added',
   discography_sync: 'Discography sync',
+  sync_failed: 'Sync failed',
   library_import: 'Library import',
 };
 
@@ -127,6 +128,7 @@ function ActivityList({ activity, total, offset, loadingMore, onLoadMore, filter
     album_edition: 'text-violet-400',
     album_split: 'text-violet-400',
     discography_sync: 'text-blue-400',
+    sync_failed: 'text-red-400',
     library_import: 'text-amber-400',
   };
 
