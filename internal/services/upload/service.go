@@ -97,6 +97,7 @@ type BatchView struct {
 	Total        int        `json:"total"`
 	Identified   int        `json:"identified"`
 	Unidentified int        `json:"unidentified"`
+	CreatedAt    string     `json:"created_at"`
 }
 
 // CommitResult reports the outcome of committing a batch.
@@ -450,6 +451,9 @@ func (s *Service) Batch(batchID string) (*BatchView, error) {
 	}
 	view := &BatchView{BatchID: batchID, Files: make([]FileView, 0, len(files))}
 	for _, f := range files {
+		if view.CreatedAt == "" || f.CreatedAt < view.CreatedAt {
+			view.CreatedAt = f.CreatedAt
+		}
 		fv := FileView{
 			ID: f.ID, Filename: f.Filename, Size: f.Size,
 			State: f.State, Skip: f.Skip, Error: f.Error,

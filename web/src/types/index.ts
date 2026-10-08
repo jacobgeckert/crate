@@ -317,6 +317,7 @@ export interface UploadBatch {
   total: number;
   identified: number;
   unidentified: number;
+  created_at: string;
 }
 
 export interface UploadBatchSummary {

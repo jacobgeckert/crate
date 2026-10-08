@@ -446,7 +446,7 @@ export default function Upload() {
                     onClick={() => setBatchId(b.batch_id)}
                     className="w-full text-left px-4 py-3 hover:bg-zinc-800/50 flex items-center justify-between"
                   >
-                    <span className="text-sm text-zinc-200 font-mono">{b.batch_id}</span>
+                    <span className="text-sm text-zinc-200">{new Date(b.created_at).toLocaleString()}</span>
                     <span className="text-xs text-zinc-500">
                       {b.committed}/{b.total} committed · {b.unidentified} unidentified
                     </span>
@@ -461,8 +461,8 @@ export default function Upload() {
       {batch && (
         <>
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm text-zinc-400">
-              <span className="font-mono">{batch.batch_id}</span> · {batch.identified}/{batch.total} identified
+            <div className="text-sm text-zinc-400" title={batch.batch_id}>
+              Uploaded {new Date(batch.created_at).toLocaleString()} · {batch.identified}/{batch.total} identified
               {batch.unidentified > 0 && <span className="text-amber-400"> · {batch.unidentified} unidentified</span>}
             </div>
             <button onClick={() => setBatchId(null)} className="text-xs text-zinc-500 hover:text-zinc-300">
