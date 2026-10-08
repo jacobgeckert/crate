@@ -204,12 +204,14 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 				// Stamp the recording id if the row predates us storing it.
 				_ = s.queries.SetTrackMBRecordingID(canon.ID, recID)
 				// A stale duplicate may sit under another release's track id —
-				// the release-independent recording id folds it in.
+				// the release-independent recording id folds it in. Only mark
+				// it used once the merge lands — a failed absorb must not
+				// shield the dup from the prune pass.
 				if dup := matchByRecording(byRecording[recID], used, canon.ID, pt); dup != nil {
-					used[dup.ID] = true
 					if err := s.queries.AbsorbTrack(canon.ID, dup.ID); err != nil {
 						slog.Error("sync: merge duplicate track", "album", title, "track", pt.Title, "error", err)
 					} else {
+						used[dup.ID] = true
 						merged++
 					}
 				}
@@ -220,20 +222,20 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 		// tagged against another edition. Higher confidence than title fold.
 		if recID := pt.Metadata["recording_id"]; recID != "" {
 			if match := matchByRecording(byRecording[recID], used, 0, pt); match != nil {
-				used[match.ID] = true
 				if err := s.queries.RelinkTrack(match.ID, providerName, pt.Id); err != nil {
 					slog.Error("sync: relink track", "album", title, "track", pt.Title, "error", err)
 				} else {
+					used[match.ID] = true
 					matched++
 				}
 				continue
 			}
 		}
 		if match := matchLocalTrack(locals, used, pt); match != nil {
-			used[match.ID] = true
 			if err := s.queries.RelinkTrack(match.ID, providerName, pt.Id); err != nil {
 				slog.Error("sync: relink track", "album", title, "track", pt.Title, "error", err)
 			} else {
+				used[match.ID] = true
 				matched++
 			}
 			continue

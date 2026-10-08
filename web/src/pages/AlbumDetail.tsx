@@ -914,6 +914,7 @@ export default function AlbumDetail() {
             )}
             {selectedTrack.downloaded_from && <DetailRow label="Source">{selectedTrack.downloaded_from}</DetailRow>}
             {selectedTrack.file_path && <DetailRow label="Path">{selectedTrack.file_path}</DetailRow>}
+            <DetailRow label="Provider">{selectedTrack.provider} · {selectedTrack.provider_id}</DetailRow>
           </div>
         )}
       </DetailSheet>
