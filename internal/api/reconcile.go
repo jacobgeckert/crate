@@ -140,8 +140,8 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 // track list: local tracks matching a provider track by title (album-scoped,
 // disc/track number as tiebreak) are relinked in place so the owned file is
 // kept; provider tracks with no local match are created as wanted; local tracks
-// matching nothing stay owned + local; provider rows matching nothing are
-// pruned — leftovers from a different edition or stale listing. With no local
+// matching nothing stay owned + local; any row matching nothing and holding no
+// file is pruned — leftovers from a different edition or stale listing. With no local
 // tracks present it degenerates to "create the missing wanted tracks",
 // matching the watch path.
 func (s *Server) reconcileAlbumTracks(ctx context.Context, providerName string, albumID int64, albumProviderID string) {
@@ -238,7 +238,7 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			}
 			continue
 		}
-		if err := s.queries.CreateTrack(&models.Track{
+		newTrack := &models.Track{
 			AlbumID:       albumID,
 			Title:         pt.Title,
 			TrackNumber:   int(pt.TrackNumber),
@@ -248,7 +248,8 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			ProviderID:    pt.Id,
 			MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
 			Status:        trackStatus,
-		}); err != nil {
+		}
+		if err := s.queries.CreateTrack(newTrack); err != nil {
 			// A row on another album may be squatting this release-track id —
 			// e.g. it was moved before splits rekeyed unmatched rows. This
 			// album's own tracklist is authoritative for the id, so the
@@ -256,18 +257,9 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			if squatter, ferr := s.queries.FindTrackByProvider(providerName, pt.Id); ferr == nil && squatter != nil && squatter.AlbumID != albumID {
 				if rerr := s.queries.RelinkTrack(squatter.ID, provider.LocalProvider, fmt.Sprintf("loc-split-%d", squatter.ID)); rerr == nil {
 					slog.Info("sync: rekeyed squatted track to local", "album", title, "track", squatter.Title, "other_album", squatter.AlbumID)
-					if err := s.queries.CreateTrack(&models.Track{
-						AlbumID:       albumID,
-						Title:         pt.Title,
-						TrackNumber:   int(pt.TrackNumber),
-						DiscNumber:    int(pt.DiscNumber),
-						DurationMs:    int(pt.DurationMs),
-						Provider:      providerName,
-						ProviderID:    pt.Id,
-						MBRecordingID: strPtrOrNil(pt.Metadata["recording_id"]),
-						Status:        trackStatus,
-					}); err == nil {
+					if err := s.queries.CreateTrack(newTrack); err == nil {
 						added++
+						used[newTrack.ID] = true
 						continue
 					}
 				}
@@ -275,27 +267,37 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			slog.Error("sync: create track", "album", title, "track", pt.Title, "error", err)
 		} else {
 			added++
+			used[newTrack.ID] = true
 		}
 	}
 
+	// Revert owned rows whose file vanished before pruning — a stray whose
+	// file is gone flips to wanted and gets removed in the same pass instead
+	// of surviving as an empty row.
+	reverted := s.verifyAlbumFiles(albumID)
+
 	if prune && len(detail.Tracks) > 0 {
-		// Provider rows that matched nothing in the new listing are leftovers
-		// from a different edition or an outdated tracklist. Owned/in-flight
-		// ones are kept — the file still exists — everything else is removed
-		// (queue rows cascade).
-		for pid, t := range byID {
+		// Rows that matched nothing in the new listing are leftovers from a
+		// different edition, an outdated tracklist, or a rekeyed squatter.
+		// Local rows aren't exempt — an unmatched local row with no file is
+		// clutter that would sit forever and still get auto-searched.
+		// Owned/in-flight rows are kept (the file still exists); queue rows
+		// cascade. Re-listed so the statuses reflect verifyAlbumFiles.
+		tracks, lerr := s.queries.ListTracksByAlbum(albumID)
+		if lerr != nil {
+			slog.Error("sync: list tracks for prune", "album", title, "error", lerr)
+		}
+		for _, t := range tracks {
 			if used[t.ID] || t.Status == models.TrackStatusOwned || t.Status == models.TrackStatusDownloading {
 				continue
 			}
 			if err := s.queries.DeleteTrack(t.ID); err != nil {
-				slog.Error("sync: prune stale track", "album", title, "track", t.Title, "provider_id", pid, "error", err)
+				slog.Error("sync: prune stale track", "album", title, "track", t.Title, "provider_id", t.ProviderID, "error", err)
 			} else {
 				pruned++
 			}
 		}
 	}
-
-	reverted := s.verifyAlbumFiles(albumID)
 
 	if added > 0 || matched > 0 || merged > 0 || pruned > 0 || reverted > 0 {
 		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged, "stale_pruned", pruned, "files_reverted", reverted)

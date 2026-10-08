@@ -1177,6 +1177,17 @@ func TestRefreshPrunesStrayTracks(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A local-provider stray — e.g. a rekeyed squatter or an import leftover
+	// whose file is gone — is pruned too; local rows are only kept while they
+	// hold a real file or match the listing.
+	localStray := models.Track{
+		AlbumID: album.ID, Title: "Local Phantom", TrackNumber: 11,
+		Provider: "local", ProviderID: "loc-x1", Status: models.TrackStatusWanted,
+	}
+	if err := env.queries.CreateTrack(&localStray); err != nil {
+		t.Fatal(err)
+	}
+
 	// An owned stray with a real file must survive the prune.
 	rel := "Test Artist/Album One/99 Bonus.flac"
 	full := filepath.Join(libDir, rel)
@@ -1195,6 +1206,17 @@ func TestRefreshPrunesStrayTracks(t *testing.T) {
 	}
 	env.queries.UpdateTrackFilePath(ownedStray.ID, rel)
 
+	// An owned stray whose file is gone reverts to wanted mid-fold, then gets
+	// pruned in the same pass.
+	goneStray := models.Track{
+		AlbumID: album.ID, Title: "Gone Cut", TrackNumber: 12,
+		Provider: "test", ProviderID: "3997", Status: models.TrackStatusOwned,
+	}
+	if err := env.queries.CreateTrack(&goneStray); err != nil {
+		t.Fatal(err)
+	}
+	env.queries.UpdateTrackFilePath(goneStray.ID, "Test Artist/Album One/deleted.flac")
+
 	w := env.do("POST", fmt.Sprintf("/api/albums/%d/refresh", album.ID), "")
 	if w.Code != 202 {
 		t.Fatalf("refresh: expected 202, got %d", w.Code)
@@ -1202,6 +1224,12 @@ func TestRefreshPrunesStrayTracks(t *testing.T) {
 
 	if got, _ := env.queries.GetTrack(stray.ID); got != nil {
 		t.Error("expected stray wanted row to be pruned")
+	}
+	if got, _ := env.queries.GetTrack(localStray.ID); got != nil {
+		t.Error("expected fileless local stray to be pruned")
+	}
+	if got, _ := env.queries.GetTrack(goneStray.ID); got != nil {
+		t.Error("expected stray with a missing file to be pruned")
 	}
 	got, _ := env.queries.GetTrack(ownedStray.ID)
 	if got == nil || got.Status != models.TrackStatusOwned {
