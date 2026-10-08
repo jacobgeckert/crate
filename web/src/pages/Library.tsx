@@ -283,9 +283,9 @@ export default function Library() {
           <p className="text-zinc-500 text-sm text-center py-6">No matches</p>
         )}
         {sort === 'recent' && (
-          <div className="space-y-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
             {recentArtists.map((artist) => (
-              <ArtistRow
+              <ArtistCard
                 key={artist.id}
                 artist={artist}
                 addedLabel={formatRelativeDate(artist.created_at)}
@@ -301,9 +301,9 @@ export default function Library() {
                 {letter}
               </p>
             )}
-            <div className="space-y-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
               {group.map((artist) => (
-                <ArtistRow
+                <ArtistCard
                   key={artist.id}
                   artist={artist}
                   matchCount={matchCountByArtist?.get(artist.id)}
@@ -387,7 +387,7 @@ export default function Library() {
   );
 }
 
-function ArtistRow({
+function ArtistCard({
   artist,
   matchCount,
   isTrackMatch,
@@ -404,108 +404,92 @@ function ArtistRow({
   selected?: boolean;
   onSelect?: (e: { shiftKey: boolean }) => void;
 }) {
+  const owned = artist.owned_tracks ?? 0;
+  const total = artist.total_tracks ?? 0;
+
   const inner = (
-    <>
-      {selecting && (
-        <input
-          type="checkbox"
-          checked={!!selected}
-          readOnly
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect?.(e);
-          }}
-          className="accent-emerald-500 shrink-0"
-        />
-      )}
-      <div className="w-11 h-11 rounded-full bg-zinc-700 overflow-hidden shrink-0">
+    <div
+      className={`rounded-lg overflow-hidden transition-colors ${
+        selected ? 'ring-2 ring-emerald-500 bg-emerald-900/20' : 'bg-zinc-800/40 hover:bg-zinc-800/70'
+      }`}
+    >
+      <div className="relative aspect-square bg-zinc-700">
         {artist.image_url ? (
-          <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" />
+          <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-zinc-500">
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
           </div>
         )}
+        {selecting && (
+          <div
+            className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+              selected ? 'bg-emerald-500 border-emerald-500' : 'bg-zinc-900/60 border-zinc-400'
+            }`}
+          >
+            {selected && (
+              <svg className="w-3 h-3 text-zinc-900" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            )}
+          </div>
+        )}
+        {(artist.provider === 'local' || artist.orphaned) && (
+          <span
+            className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase ${
+              artist.orphaned ? 'bg-red-900/80 text-red-300' : 'bg-amber-900/80 text-amber-300'
+            }`}
+          >
+            {artist.orphaned ? 'orphaned' : 'not linked'}
+          </span>
+        )}
+        {!selecting && providerArtistUrl(artist.provider, artist.provider_id) && (
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(providerArtistUrl(artist.provider, artist.provider_id), '_blank', 'noopener');
+            }}
+            className="absolute bottom-1.5 right-1.5 p-1 rounded bg-zinc-900/70 text-zinc-400 hover:text-zinc-200 transition-colors"
+            title={`View on ${PROVIDER_LABEL[artist.provider] ?? artist.provider}`}
+          >
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </button>
+        )}
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm truncate">{artist.name}</p>
+      <div className="p-2">
+        <p className="text-xs font-medium truncate" title={artist.name}>{artist.name}</p>
         {isTrackMatch && matchCount ? (
-          <p className="text-[11px] text-zinc-500 mt-0.5">{matchCount} matching track{matchCount > 1 ? 's' : ''}</p>
+          <p className="text-[10px] text-zinc-500 mt-0.5">{matchCount} matching track{matchCount > 1 ? 's' : ''}</p>
         ) : (
-          <div className="mt-0.5">
-            {addedLabel && <p className="text-[11px] text-zinc-500 mb-0.5">Added {addedLabel}</p>}
-            <ProgressBar owned={artist.owned_tracks ?? 0} total={artist.total_tracks ?? 0} />
-          </div>
+          <>
+            {addedLabel && <p className="text-[10px] text-zinc-600">Added {addedLabel}</p>}
+            <div className="mt-1">
+              <ProgressBar owned={owned} total={total} />
+            </div>
+            <p className="text-[10px] text-zinc-500 mt-1 flex items-center justify-between">
+              <span className="tabular-nums">{owned}/{total}</span>
+              <span className={artist.status === 'owned' ? 'text-green-400' : ''}>
+                {artist.status === 'owned' ? 'Owned' : artist.watch_new_releases ? 'Monitored' : 'Not monitored'}
+              </span>
+            </p>
+          </>
         )}
       </div>
-      {artist.watch_new_releases && (
-        <svg className="w-3.5 h-3.5 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" />
-        </svg>
-      )}
-      {!selecting && providerArtistUrl(artist.provider, artist.provider_id) && (
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            window.open(providerArtistUrl(artist.provider, artist.provider_id), '_blank', 'noopener');
-          }}
-          className="text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
-          title={`View on ${PROVIDER_LABEL[artist.provider] ?? artist.provider}`}
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-        </button>
-      )}
-      {artist.provider === 'local' && (
-        <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-amber-900/50 text-amber-400">
-          not linked
-        </span>
-      )}
-      {artist.orphaned && (
-        <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-red-900/50 text-red-400">
-          orphaned
-        </span>
-      )}
-      <StatusBadge status={artist.status} />
-      {!selecting && (
-        <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-      )}
-    </>
+    </div>
   );
 
   if (selecting) {
     return (
-      <button
-        onClick={onSelect}
-        className={`w-full flex items-center gap-3 rounded-lg p-2.5 text-left transition-colors ${
-          selected ? 'bg-emerald-900/30 ring-1 ring-emerald-800/60' : 'bg-zinc-800/40 active:bg-zinc-800'
-        }`}
-      >
+      <button onClick={onSelect} className="text-left">
         {inner}
       </button>
     );
   }
 
-  return (
-    <Link
-      to={`/artist/${artist.id}`}
-      className="flex items-center gap-3 bg-zinc-800/40 rounded-lg p-2.5 active:bg-zinc-800 transition-colors"
-    >
-      {inner}
-    </Link>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === 'partial' || status === 'watched') return null;
-
-  return (
-    <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-green-900/50 text-green-400">
-      owned
-    </span>
-  );
+  return <Link to={`/artist/${artist.id}`}>{inner}</Link>;
 }
 
 function groupByLetter(artists: Artist[]): { letter: string; artists: Artist[] }[] {
