@@ -2758,6 +2758,72 @@ func TestWantedTracksSkipsUnreleased(t *testing.T) {
 	}
 }
 
+// ListArtists totals mirror the artist page: upcoming releases (release_date
+// today or later, or a future year with no date) don't count toward the
+// collection progress bars.
+func TestListArtistsExcludesUpcomingReleases(t *testing.T) {
+	env := newTestEnv(t)
+	q := env.queries
+
+	artist := models.Artist{Name: "Future", Provider: "test", ProviderID: "a-upcoming", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(&artist); err != nil {
+		t.Fatal(err)
+	}
+
+	future, past, today := "2999-01-01", "2000-01-01", time.Now().Format("2006-01-02")
+	nextYear, oldYear := time.Now().Year()+1, 2000
+	cases := []struct {
+		date *string
+		year *int
+		want bool
+	}{
+		{&future, nil, false},    // dated in the future
+		{&today, nil, false},     // out today = upcoming on the artist page
+		{&past, nil, true},       // released
+		{nil, &nextYear, false},  // undated but a future year
+		{nil, &oldYear, true},    // undated old year
+		{nil, nil, true},         // no date info at all
+	}
+	for i, c := range cases {
+		al := models.Album{
+			ArtistID: artist.ID, Title: fmt.Sprintf("Album %d", i),
+			Provider: "test", ProviderID: fmt.Sprintf("al-up-%d", i),
+			RecordType: "album", ReleaseDate: c.date, Year: c.year,
+			Status: models.AlbumStatusWatched,
+		}
+		if err := q.CreateAlbum(&al); err != nil {
+			t.Fatal(err)
+		}
+		tr := models.Track{
+			AlbumID: al.ID, Title: fmt.Sprintf("Song %d", i), TrackNumber: 1,
+			Provider: "test", ProviderID: fmt.Sprintf("t-up-%d", i), Status: models.TrackStatusOwned,
+		}
+		if err := q.CreateTrack(&tr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	artists, err := q.ListArtists()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *models.Artist
+	for i := range artists {
+		if artists[i].ID == artist.ID {
+			got = &artists[i]
+		}
+	}
+	if got == nil {
+		t.Fatal("artist not listed")
+	}
+	if got.TotalTracks != 3 {
+		t.Errorf("expected 3 counted tracks (past/undated releases only), got %d", got.TotalTracks)
+	}
+	if got.OwnedTracks != 3 {
+		t.Errorf("expected 3 owned tracks, got %d", got.OwnedTracks)
+	}
+}
+
 // Pre-release singles that duplicate an album/EP track aren't auto-searched —
 // the album copy wins. Singular single tracks stay wanted.
 func TestWantedTracksSkipsAlbumBoundSingles(t *testing.T) {

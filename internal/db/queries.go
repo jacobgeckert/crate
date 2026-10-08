@@ -94,6 +94,10 @@ func (q *Queries) ListArtists() ([]models.Artist, error) {
 		        COALESCE(SUM(CASE WHEN t.status = 'owned' THEN 1 ELSE 0 END), 0) as owned_tracks
 		 FROM artists a
 		 LEFT JOIN albums al ON al.artist_id = a.id AND al.status != 'ignored'
+		      AND (
+		           (al.release_date IS NOT NULL AND al.release_date != '' AND al.release_date < date('now'))
+		           OR ((al.release_date IS NULL OR al.release_date = '') AND (al.year IS NULL OR al.year <= CAST(strftime('%Y', 'now') AS INTEGER)))
+		      )
 		 LEFT JOIN tracks t ON t.album_id = al.id AND t.status != 'ignored'
 		 GROUP BY a.id
 		 ORDER BY a.name`,
