@@ -712,6 +712,19 @@ func (q *Queries) ListWantedTracks() ([]models.Track, error) {
 // futile. Partial dates compare lexicographically ("2026" > today ⇒ upcoming).
 const wantedReleaseClause = ` AND (al.release_date IS NULL OR al.release_date <= date('now'))`
 
+// wantedSingleClause suppresses a single's track when the same-titled track
+// exists on an album or EP by the same artist — pre-release singles are
+// album-bound, so the album copy wins and the single isn't fetched twice.
+// Only applies to auto-queue paths; an explicit per-album search still works,
+// and an ignored album/EP (or ignored twin track) releases the suppression.
+const wantedSingleClause = ` AND (COALESCE(al.record_type, '') <> 'single' OR NOT EXISTS (
+	    SELECT 1 FROM tracks t2 JOIN albums al2 ON al2.id = t2.album_id
+	    WHERE al2.artist_id = al.artist_id
+	      AND COALESCE(al2.record_type, '') IN ('album', 'ep')
+	      AND al2.status <> 'ignored'
+	      AND t2.status <> 'ignored'
+	      AND lower(t2.title) = lower(t.title)))`
+
 func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
@@ -720,7 +733,7 @@ func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 	          FROM tracks t
 	          JOIN albums al ON al.id = t.album_id
 	          JOIN artists ar ON ar.id = al.artist_id
-	          WHERE t.status = 'wanted'` + wantedReleaseClause + `
+	          WHERE t.status = 'wanted'` + wantedReleaseClause + wantedSingleClause + `
 	          ORDER BY ar.name, al.year, t.disc_number, t.track_number`
 	var args []any
 	if limit > 0 {
@@ -743,7 +756,7 @@ func (q *Queries) ListWantedTracksWithCooldown(cooldownCutoff string, limit int)
 	          FROM tracks t
 	          JOIN albums al ON al.id = t.album_id
 	          JOIN artists ar ON ar.id = al.artist_id
-	          WHERE t.status = 'wanted'` + wantedReleaseClause + `
+	          WHERE t.status = 'wanted'` + wantedReleaseClause + wantedSingleClause + `
 	            AND NOT EXISTS (
 	              SELECT 1 FROM download_queue d
 	              WHERE d.track_id = t.id AND d.status = 'failed'
@@ -787,7 +800,7 @@ func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, erro
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
-		 WHERE t.status = 'wanted' AND al.artist_id = ?` + wantedReleaseClause + `
+		 WHERE t.status = 'wanted' AND al.artist_id = ?` + wantedReleaseClause + wantedSingleClause + `
 		 ORDER BY al.year, t.disc_number, t.track_number`, artistID,
 	)
 	if err != nil {

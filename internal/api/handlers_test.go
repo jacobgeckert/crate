@@ -2702,6 +2702,69 @@ func TestWantedTracksSkipsUnreleased(t *testing.T) {
 	}
 }
 
+// Pre-release singles that duplicate an album/EP track aren't auto-searched —
+// the album copy wins. Singular single tracks stay wanted.
+func TestWantedTracksSkipsAlbumBoundSingles(t *testing.T) {
+	env := newTestEnv(t)
+	q := env.queries
+
+	artist := models.Artist{Name: "Dupe", Provider: "test", ProviderID: "a-dupe", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(&artist); err != nil {
+		t.Fatal(err)
+	}
+	mkAlbum := func(title, providerID, recordType string, status models.AlbumStatus) models.Album {
+		al := models.Album{
+			ArtistID: artist.ID, Title: title, Provider: "test", ProviderID: providerID,
+			RecordType: recordType, Status: status,
+		}
+		if err := q.CreateAlbum(&al); err != nil {
+			t.Fatal(err)
+		}
+		return al
+	}
+	mkTrack := func(albumID int64, providerID, title string, status models.TrackStatus) {
+		tr := models.Track{
+			AlbumID: albumID, Title: title, TrackNumber: 1,
+			Provider: "test", ProviderID: providerID, Status: status,
+		}
+		if err := q.CreateTrack(&tr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	album := mkAlbum("The Album", "al-dupe", "album", models.AlbumStatusWatched)
+	single := mkAlbum("Song X - Single", "sg-dupe", "single", models.AlbumStatusWatched)
+	ignoredAl := mkAlbum("Ignored LP", "al-ign", "album", models.AlbumStatusIgnored)
+	orphanSingle := mkAlbum("Solo - Single", "sg-solo", "single", models.AlbumStatusWatched)
+
+	mkTrack(album.ID, "t-album-x", "Song X", models.TrackStatusWanted)
+	mkTrack(single.ID, "t-single-x", "Song X", models.TrackStatusWanted)  // album-bound → suppressed
+	mkTrack(single.ID, "t-single-b", "B-Side", models.TrackStatusWanted)  // single-only → wanted
+	mkTrack(orphanSingle.ID, "t-solo", "Solo", models.TrackStatusWanted)  // twin on ignored album → still wanted
+	mkTrack(ignoredAl.ID, "t-ign", "Solo", models.TrackStatusIgnored)
+
+	all, err := q.ListWantedTracks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 wanted tracks, got %d", len(all))
+	}
+	for _, tr := range all {
+		if tr.AlbumID == single.ID && tr.Title == "Song X" {
+			t.Errorf("album-bound single track should be suppressed: %v", tr.Title)
+		}
+	}
+
+	byArtist, err := q.ListWantedTracksByArtist(artist.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byArtist) != 3 {
+		t.Errorf("expected 3 artist tracks, got %d", len(byArtist))
+	}
+}
+
 func TestLargeLibrarySearchResults(t *testing.T) {
 	env := newTestEnv(t)
 	seedLargeLibrary(t, env.queries, 40, 5, 20) // 4000 tracks, titles like "Song 000-00-00"
