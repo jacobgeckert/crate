@@ -575,12 +575,17 @@ func (s *Service) Commit(ctx context.Context, batchID, onDuplicate string) (*Com
 		if f.Skip || f.State != models.UploadStateIdentified {
 			continue
 		}
-		if f.Meta == nil || f.Match == nil {
+		if f.Match == nil {
 			continue
 		}
+		// Meta may be absent on an unidentified file that got a manual track
+		// override — the organizer names from the track/album rows anyway.
 		var meta FileMetaView
+		if f.Meta != nil {
+			_ = json.Unmarshal([]byte(*f.Meta), &meta)
+		}
 		var match Match
-		if json.Unmarshal([]byte(*f.Meta), &meta) != nil || json.Unmarshal([]byte(*f.Match), &match) != nil {
+		if json.Unmarshal([]byte(*f.Match), &match) != nil {
 			continue
 		}
 		fm := s.fullMeta(f.StagedPath, &meta)

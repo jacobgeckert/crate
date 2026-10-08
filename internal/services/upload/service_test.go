@@ -567,6 +567,56 @@ func TestCommitKeepsUnresolvedBatch(t *testing.T) {
 	}
 }
 
+// TestSetTrackMatchOverride: the manual override retargets an unidentified
+// file at a chosen library track — the file becomes committable and lands on
+// that track at commit.
+func TestSetTrackMatchOverride(t *testing.T) {
+	s, q, _, _ := newTestService(t)
+	track := seedWantedTrack(t, q, "Radiohead", "OK Computer", "Paranoid Android")
+
+	// Stage an untagged file — it can't be identified.
+	bare := filepath.Join(t.TempDir(), "bare.mp3")
+	if err := os.WriteFile(bare, []byte{0xFF, 0xFB, 0x90}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	fh, err := os.Open(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged, err := s.Stage("ovr", "bare.mp3", fh, 0)
+	fh.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Identify(context.Background(), "ovr"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetTrackMatch(staged.ID, track.ID); err != nil {
+		t.Fatalf("set track match: %v", err)
+	}
+	view, _ := s.Batch("ovr")
+	f := view.Files[0]
+	if f.State != models.UploadStateIdentified || f.Match == nil || f.Match.TrackID != track.ID {
+		t.Fatalf("after override: state=%s match=%+v, want identified→track %d", f.State, f.Match, track.ID)
+	}
+	if f.Match.Reason != "user selected" {
+		t.Errorf("match reason = %q, want 'user selected'", f.Match.Reason)
+	}
+
+	res, err := s.Commit(context.Background(), "ovr", "skip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Committed) != 1 {
+		t.Fatalf("commit result = %+v", res)
+	}
+	got, _ := q.GetTrack(track.ID)
+	if got.Status != models.TrackStatusOwned {
+		t.Errorf("track status = %s, want owned after override commit", got.Status)
+	}
+}
+
 func TestValidBatchID(t *testing.T) {
 	for name, want := range map[string]bool{
 		"abc-123":     true,
