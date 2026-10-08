@@ -6,6 +6,7 @@ import AlphabetRail from '../components/AlphabetRail';
 import FilterBar from '../components/FilterBar';
 import ProgressBar from '../components/ProgressBar';
 import { formatRelativeDate, providerArtistUrl, PROVIDER_LABEL } from '../lib/format';
+import { usePlayer } from '../components/Player';
 import { useToast } from '../components/Toast';
 import type { Artist } from '../types/index';
 
@@ -14,6 +15,12 @@ type LibrarySort = 'az' | 'recent';
 export default function Library() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const player = usePlayer();
+  // Lift fixed bottom bars above the player when it's active: player top is
+  // ~3.5rem above the mobile nav (3.5rem) — on desktop it sits at bottom-0.
+  const floatClass = player.current
+    ? 'bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] md:bottom-[4.5rem]'
+    : 'bottom-4';
   const [filter, setFilter] = useState('');
   const [debouncedFilter, setDebouncedFilter] = useState('');
   const [selecting, setSelecting] = useState(false);
@@ -319,7 +326,7 @@ export default function Library() {
       </div>
 
       {selecting && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40">
+        <div className={`fixed ${floatClass} left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40`}>
           <button
             onClick={() => setSelected(new Set(filteredArtists.map((a) => a.id)))}
             className="text-xs text-zinc-400 hover:text-zinc-200 px-1"
@@ -364,7 +371,7 @@ export default function Library() {
       )}
 
       {(refreshIds.length > 0 || ambientSyncs.length > 0) && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40">
+        <div className={`fixed ${floatClass} left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40`}>
           <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
           <div className="min-w-0">
             <p className="text-xs text-zinc-300 whitespace-nowrap">
