@@ -561,11 +561,13 @@ export default function ArtistDetail() {
           <div className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
           <div className="min-w-0">
             <p className="text-sm text-blue-300">
-              {!artist.sync || (artist.sync.active && artist.sync.total === 0)
-                ? 'Contacting provider…'
-                : artist.sync.active
-                  ? `Syncing releases — ${artist.sync.done} of ${artist.sync.total}`
-                  : 'Finishing up…'}
+              {artist.sync?.phase === 'queued'
+                ? 'Waiting for another sync…'
+                : !artist.sync || (artist.sync.active && artist.sync.total === 0)
+                  ? 'Contacting provider…'
+                  : artist.sync.active
+                    ? `Syncing releases — ${artist.sync.done} of ${artist.sync.total}`
+                    : 'Finishing up…'}
             </p>
             {artist.sync?.active && artist.sync.current && (
               <p className="text-[11px] text-blue-400/70 truncate">{artist.sync.current}</p>

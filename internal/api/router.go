@@ -39,6 +39,13 @@ type Server struct {
 	// syncStatus: artistID → *models.SyncInfo — live discography-sync progress
 	// for the artist detail page's polling banner.
 	syncStatus sync.Map
+	// syncMu serializes discography syncs: providers rate-limit per process
+	// (MusicBrainz ~1 req/s), so concurrent syncs would burn each other's
+	// budgets waiting in the limiter and die mid-reconcile.
+	syncMu sync.Mutex
+	// refreshDedup: artistID → struct{} — one queued-or-running refresh per
+	// artist; repeat clicks fold into the in-flight sync.
+	refreshDedup sync.Map
 	// albumSync: albumID → *models.SyncInfo — live album-refresh progress for
 	// the album detail page's polling banner.
 	albumSync  sync.Map

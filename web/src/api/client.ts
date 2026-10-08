@@ -84,7 +84,7 @@ export const api = {
     }),
   getUpcomingReleases: () => request<Album[]>('/releases/upcoming'),
   refreshArtists: (ids: number[]) =>
-    request<{ queued: number }>(`/artists/refresh`, { method: 'POST', body: JSON.stringify({ ids }) }),
+    request<{ queued: number; ids: number[] }>(`/artists/refresh`, { method: 'POST', body: JSON.stringify({ ids }) }),
   getSyncStatus: () => request<{ items: ArtistSyncStatus[] }>('/artists/sync'),
   setArtistsNewReleases: (ids: number[], enabled: boolean) =>
     request<{ updated: number }>(`/artists/new-releases`, {

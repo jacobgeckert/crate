@@ -94,10 +94,10 @@ export default function Library() {
 
   const bulkRefresh = useMutation({
     mutationFn: (ids: number[]) => api.refreshArtists(ids),
-    onSuccess: (res, ids) => {
+    onSuccess: (res) => {
       seenSync.current = false;
       syncTicks.current = 0;
-      setRefreshIds(res.queued > 0 ? ids : []);
+      setRefreshIds(res.queued > 0 ? res.ids : []);
       toast(`Refreshing ${res.queued} artist(s)`, 'success');
       setSelected(new Set());
       setSelecting(false);
@@ -336,7 +336,7 @@ export default function Library() {
           <div className="min-w-0">
             <p className="text-xs text-zinc-300 whitespace-nowrap">
               {refreshIds.length > 0
-                ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active && i.done > 0).length} of ${refreshIds.length} artists`
+                ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active).length} of ${refreshIds.length} artists`
                 : `Syncing discography — ${ambientSyncs.length} artist(s)`}
             </p>
             {(() => {

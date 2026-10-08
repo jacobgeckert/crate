@@ -1259,8 +1259,12 @@ func (s *Server) handleRefreshArtist(w http.ResponseWriter, r *http.Request) {
 
 // startArtistRefresh drops the artist's cached provider data and kicks off a
 // background discography reconcile. Caller has already validated the artist is
-// provider-linked and healthy.
-func (s *Server) startArtistRefresh(artist *models.Artist) {
+// provider-linked and healthy. Returns false when a refresh is already queued
+// or running for this artist — re-clicks fold into the in-flight sync.
+func (s *Server) startArtistRefresh(artist *models.Artist) bool {
+	if _, loaded := s.refreshDedup.LoadOrStore(artist.ID, struct{}{}); loaded {
+		return false
+	}
 	s.cache.Delete(artist.Provider + ":artist:" + artist.ProviderID)
 	s.cache.Delete(artist.Provider + ":artist-albums:" + artist.ProviderID)
 	if albums, err := s.queries.ListAlbumsByArtist(artist.ID); err == nil {
@@ -1274,8 +1278,10 @@ func (s *Server) startArtistRefresh(artist *models.Artist) {
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
+		defer s.refreshDedup.Delete(artist.ID)
 		s.reconcileLocalArtist(artist.Provider, artist.ID, artist.ProviderID)
 	}()
+	return true
 }
 
 // handleBulkRefreshArtists refreshes the discographies of up to 100 selected
@@ -1293,7 +1299,7 @@ func (s *Server) handleBulkRefreshArtists(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	queued := 0
+	queuedIDs := make([]int64, 0, len(req.IDs))
 	for _, id := range req.IDs {
 		artist, err := s.queries.GetArtist(id)
 		if err != nil || artist == nil {
@@ -1302,12 +1308,13 @@ func (s *Server) handleBulkRefreshArtists(w http.ResponseWriter, r *http.Request
 		if artist.Provider == provider.LocalProvider || !s.providers.IsHealthy(artist.Provider) {
 			continue
 		}
-		s.startArtistRefresh(artist)
-		queued++
+		if s.startArtistRefresh(artist) {
+			queuedIDs = append(queuedIDs, id)
+		}
 	}
-	slog.Info("sync: bulk refresh queued", "artists", queued)
+	slog.Info("sync: bulk refresh queued", "artists", len(queuedIDs))
 
-	writeJSON(w, http.StatusAccepted, map[string]int{"queued": queued})
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": len(queuedIDs), "ids": queuedIDs})
 }
 
 // handleSyncStatus returns every artist's live discography-sync progress — the

@@ -30,8 +30,18 @@ import (
 // provider discography. Safe to re-run: already-linked albums are recognised by
 // provider id and only gain newly-listed tracks, so it never duplicates.
 func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artistProviderID string) {
+	// Report queued immediately so the sync-status poll sees every selected
+	// artist before the lock below admits it — otherwise the UI's all-done
+	// check could fire in the gap between two serialized syncs.
+	s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "queued"})
+	// One discography sync at a time. The timeout applies only after the lock
+	// is held — a sync's budget covers its own provider calls, not time spent
+	// queued behind other artists' work in the provider's rate limiter.
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	// A wedged provider must not park a background worker forever.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	name := fmt.Sprintf("artist %d", artistID)
