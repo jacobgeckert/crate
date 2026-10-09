@@ -1,0 +1,26 @@
+name: Cleanup workflow runs
+
+on:
+  schedule:
+    - cron: "17 4 * * 0" # weekly, Sunday 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old runs (keep 30 newest per workflow)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          KEEP: "30"
+        run: |
+          gh api "repos/$GH_REPO/actions/workflows" --jq '.workflows[].id' | while read -r wf; do
+            gh api --paginate "repos/$GH_REPO/actions/workflows/$wf/runs?per_page=100" \
+              --jq '.workflow_runs[].id' | tail -n "+$((KEEP + 1))" | while read -r run; do
+                gh api -X DELETE "repos/$GH_REPO/actions/runs/$run" || true
+              done
+          done
