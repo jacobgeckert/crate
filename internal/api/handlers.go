@@ -656,6 +656,7 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	albums, _ := s.queries.ListAlbumsByArtist(id)
 	for i := range albums {
 		tracks, _ := s.queries.ListTracksByAlbum(albums[i].ID)
+		s.lyrics.MarkTracks(tracks)
 		albums[i].Tracks = tracks
 	}
 	artist.Albums = albums
@@ -925,6 +926,7 @@ func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tracks, _ := s.queries.ListTracksByAlbum(id)
+	s.lyrics.MarkTracks(tracks)
 	album.Tracks = tracks
 	if v, ok := s.albumSync.Load(id); ok {
 		album.Sync = v.(*models.SyncInfo)

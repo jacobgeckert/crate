@@ -68,6 +68,7 @@ export default function AlbumDetail() {
         rep.skipped > 0 ? `${rep.skipped} skipped` : null,
       ].filter(Boolean).join(', ');
       toast(rep.fetched > 0 ? `Synced lyrics — ${parts}` : `Synced lyrics — ${parts || 'nothing to fetch'}`, rep.fetched > 0 ? 'success' : 'error');
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });
@@ -677,7 +678,15 @@ export default function AlbumDetail() {
                       </span>
                     )}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">{track.title}</p>
+                      <p className="text-sm flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{track.title}</span>
+                        {track.has_lyrics && (
+                          <svg className="w-3 h-3 shrink-0 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <title>Synced lyrics (.lrc)</title>
+                            <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v1a7 7 0 0 1-14 0v-1" /><path d="M12 18v4" /><path d="M8 22h8" />
+                          </svg>
+                        )}
+                      </p>
                       <p className="text-[11px] text-zinc-600 tabular-nums">{formatDuration(track.duration_ms)}</p>
                       {track.status === 'owned' && (track.file_path || track.downloaded_from || track.download_format) && (
                         <p className="text-[10px] text-zinc-600 truncate">
@@ -988,6 +997,7 @@ export default function AlbumDetail() {
             )}
             {selectedTrack.downloaded_from && <DetailRow label="Source">{selectedTrack.downloaded_from}</DetailRow>}
             {selectedTrack.file_path && <DetailRow label="Path">{selectedTrack.file_path}</DetailRow>}
+            <DetailRow label="Lyrics">{selectedTrack.has_lyrics ? 'Synced (.lrc)' : 'None'}</DetailRow>
             <DetailRow label="Provider">{selectedTrack.provider} · {selectedTrack.provider_id}</DetailRow>
           </div>
         )}

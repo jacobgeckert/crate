@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
@@ -178,5 +179,35 @@ func TestFetchAlbumNoMatch(t *testing.T) {
 	}
 	if rep.Missing != 1 || rep.Fetched != 0 {
 		t.Fatalf("report = %+v, want missing=1 fetched=0", rep)
+	}
+}
+
+func TestMarkTracks(t *testing.T) {
+	s, q, libDir := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	album := seed(t, q)
+	rel := "Test Artist/Test Album/01 - Song.flac"
+	writeFile(t, filepath.Join(libDir, rel))
+	writeFile(t, filepath.Join(libDir, "Test Artist/Test Album/01 - Song.lrc"))
+	addTrack(t, q, album.ID, "Song", rel, models.TrackStatusOwned)
+	addTrack(t, q, album.ID, "Other", "Test Artist/Test Album/02 - Other.flac", models.TrackStatusOwned)
+	writeFile(t, filepath.Join(libDir, "Test Artist/Test Album/02 - Other.flac"))
+	outside := filepath.Join(t.TempDir(), "out.flac")
+	writeFile(t, outside)
+	writeFile(t, strings.TrimSuffix(outside, ".flac")+".lrc") // exists but outside the library
+	addTrack(t, q, album.ID, "Outside", outside, models.TrackStatusOwned)
+
+	tracks, err := q.ListTracksByAlbum(album.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.MarkTracks(tracks)
+
+	want := map[string]bool{"Song": true, "Other": false, "Outside": false}
+	for _, tr := range tracks {
+		if tr.HasLyrics != want[tr.Title] {
+			t.Errorf("%s: has_lyrics = %v, want %v", tr.Title, tr.HasLyrics, want[tr.Title])
+		}
 	}
 }

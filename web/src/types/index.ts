@@ -64,6 +64,7 @@ export interface Track {
   updated_at: string;
   album_title?: string;
   artist_name?: string;
+  has_lyrics?: boolean;
   album_cover_url?: string;
 }
 

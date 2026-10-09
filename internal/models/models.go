@@ -120,6 +120,7 @@ type Track struct {
 	AlbumTitle         string      `json:"album_title,omitempty"`
 	ArtistName         string      `json:"artist_name,omitempty"`
 	AlbumCoverURL      *string     `json:"album_cover_url,omitempty"`
+	HasLyrics          bool        `json:"has_lyrics,omitempty"`
 }
 
 type QualityTier struct {

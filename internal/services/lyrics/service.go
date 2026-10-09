@@ -89,8 +89,35 @@ const (
 	resultMissing
 )
 
+// MarkTracks sets HasLyrics on each track whose .lrc sidecar already exists
+// inside the library — the API calls this before serializing track lists.
+func (s *Service) MarkTracks(tracks []models.Track) {
+	for i := range tracks {
+		tracks[i].HasLyrics = s.hasSidecar(&tracks[i])
+	}
+}
+
+func (s *Service) hasSidecar(t *models.Track) bool {
+	if t.FilePath == nil || *t.FilePath == "" {
+		return false
+	}
+	abs := library.ResolvePath(s.libraryDir, *t.FilePath)
+	if !library.Contains(s.libraryDir, abs) {
+		return false
+	}
+	lrcPath := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".lrc"
+	info, err := os.Stat(lrcPath)
+	return err == nil && !info.IsDir()
+}
+
 func (s *Service) fetchTrack(ctx context.Context, t *models.Track, artistName, albumTitle string) result {
-	if t.Status != models.TrackStatusOwned || t.FilePath == nil || *t.FilePath == "" {
+	if t.Status != models.TrackStatusOwned {
+		return resultSkipped
+	}
+	if s.hasSidecar(t) {
+		return resultSkipped // never clobber an existing sidecar
+	}
+	if t.FilePath == nil || *t.FilePath == "" {
 		return resultSkipped
 	}
 	abs := library.ResolvePath(s.libraryDir, *t.FilePath)
@@ -98,9 +125,6 @@ func (s *Service) fetchTrack(ctx context.Context, t *models.Track, artistName, a
 		return resultSkipped
 	}
 	lrcPath := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".lrc"
-	if _, err := os.Stat(lrcPath); err == nil {
-		return resultSkipped // never clobber an existing sidecar
-	}
 
 	lrc, err := s.lookup(ctx, artistName, t.Title, albumTitle, t.DurationMs/1000)
 	if err != nil {
