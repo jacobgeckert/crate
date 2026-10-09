@@ -101,6 +101,17 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ image_url: imageUrl }),
     }),
+  // Multipart upload — no JSON Content-Type header, browser sets the boundary.
+  uploadArtistImage: async (id: number, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/images/upload/artist/${id}`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || res.statusText);
+    }
+    return res.json() as Promise<{ image_url: string }>;
+  },
 
   unwatchArtist: (id: number) =>
     request<void>(`/artists/${id}`, { method: 'DELETE' }),
@@ -113,6 +124,16 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ cover_url: coverUrl }),
     }),
+  uploadAlbumCover: async (id: number, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/images/upload/album/${id}`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || res.statusText);
+    }
+    return res.json() as Promise<{ cover_url: string }>;
+  },
 
   unwatchAlbum: (id: number) =>
     request<void>(`/albums/${id}`, { method: 'DELETE' }),

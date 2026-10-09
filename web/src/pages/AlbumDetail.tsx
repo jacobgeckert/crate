@@ -59,6 +59,19 @@ export default function AlbumDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const uploadCover = useMutation({
+    mutationFn: (file: File) => api.uploadAlbumCover(Number(id), file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
+      setCoverFailed(null);
+      setShowCoverPicker(false);
+      toast('Cover updated', 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   const fetchLyrics = useMutation({
     mutationFn: () => api.fetchAlbumLyrics(Number(id)),
     onSuccess: (rep) => {
@@ -1037,8 +1050,26 @@ export default function AlbumDetail() {
           <p className="text-xs text-zinc-500 py-4 text-center">Searching for covers…</p>
         )}
         {!coverCandidatesLoading && (coverCandidates?.candidates.length ?? 0) === 0 && (
-          <p className="text-xs text-zinc-500 py-4 text-center">No cover art found.</p>
+          <p className="text-xs text-zinc-500 py-4 text-center">No cover art found — upload your own below.</p>
         )}
+        <button
+          onClick={() => coverInputRef.current?.click()}
+          disabled={uploadCover.isPending}
+          className="mb-3 w-full text-xs text-zinc-200 bg-zinc-800 rounded-lg py-2 active:bg-zinc-700 transition-colors disabled:opacity-50"
+        >
+          {uploadCover.isPending ? 'Uploading…' : 'Upload custom cover'}
+        </button>
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) uploadCover.mutate(f);
+            e.target.value = '';
+          }}
+        />
         <div className="grid grid-cols-3 gap-2">
           {coverCandidates?.candidates.map((c) => (
             <button

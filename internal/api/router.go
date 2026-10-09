@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -55,10 +56,11 @@ type Server struct {
 	albumSync  sync.Map
 	startTime  time.Time
 	libraryDir string
+	imagesDir  string
 	version    string
 }
 
-func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service, org *organizer.Service, lyr *lyrics.Service) *Server {
+func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, dataDir string, version string, up *upload.Service, org *organizer.Service, lyr *lyrics.Service) *Server {
 	s := &Server{
 		queries:     queries,
 		providers:   providers,
@@ -74,6 +76,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,
+		imagesDir:   filepath.Join(dataDir, "images"),
 		version:     version,
 	}
 	s.router = s.setupRouter()
@@ -95,7 +98,7 @@ func (s *Server) setupRouter() chi.Router {
 	r.Use(structuredLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(120 * time.Second))
-	r.Use(maxBodySize(5<<20, "/api/uploads"))
+	r.Use(maxBodySize(5<<20, "/api/uploads", "/api/images/upload"))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:6969"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -140,6 +143,12 @@ func (s *Server) setupRouter() chi.Router {
 
 		r.Get("/releases/upcoming", s.handleUpcomingReleases)
 		r.Get("/concerts", s.handleGetConcerts)
+
+		r.Route("/images", func(r chi.Router) {
+			r.Get("/{name}", s.handleServeImage)
+			r.Post("/upload/artist/{id}", s.handleUploadArtistImage)
+			r.Post("/upload/album/{id}", s.handleUploadAlbumCover)
+		})
 
 		r.Route("/albums", func(r chi.Router) {
 			r.Get("/{id}", s.handleGetAlbum)

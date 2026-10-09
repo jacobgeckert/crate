@@ -123,6 +123,18 @@ export default function ArtistDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const uploadImage = useMutation({
+    mutationFn: (file: File) => api.uploadArtistImage(Number(id), file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['artist', id] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      setShowImagePicker(false);
+      toast('Image updated', 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   const { data: providers } = useQuery({
     queryKey: ['providers'],
     queryFn: api.listProviders,
@@ -812,8 +824,26 @@ export default function ArtistDetail() {
           <p className="text-xs text-zinc-500 py-4 text-center">Searching providers…</p>
         )}
         {!imageCandidatesLoading && (imageCandidates?.candidates.length ?? 0) === 0 && (
-          <p className="text-xs text-zinc-500 py-4 text-center">No artist images found on any provider.</p>
+          <p className="text-xs text-zinc-500 py-4 text-center">No artist images found on any provider — upload your own below.</p>
         )}
+        <button
+          onClick={() => imageInputRef.current?.click()}
+          disabled={uploadImage.isPending}
+          className="mb-3 w-full text-xs text-zinc-200 bg-zinc-800 rounded-lg py-2 active:bg-zinc-700 transition-colors disabled:opacity-50"
+        >
+          {uploadImage.isPending ? 'Uploading…' : 'Upload custom image'}
+        </button>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) uploadImage.mutate(f);
+            e.target.value = '';
+          }}
+        />
         <div className="grid grid-cols-3 gap-2">
           {imageCandidates?.candidates.map((c) => (
             <button

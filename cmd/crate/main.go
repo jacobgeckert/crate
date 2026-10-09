@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"syscall"
 	"time"
@@ -72,7 +73,7 @@ func main() {
 		os.Exit(1)
 	}
 	upSvc := upload.NewService(queries, providerMgr, cfg.UploadDir, cfg.LibraryPath, actLog, dl)
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version, upSvc, org, lyrics.NewService(queries, cfg.LibraryPath))
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, filepath.Dir(cfg.DatabasePath), Version, upSvc, org, lyrics.NewService(queries, cfg.LibraryPath))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
