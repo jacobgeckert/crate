@@ -417,7 +417,7 @@ export default function Library() {
 
           <button
             onClick={() => setExpandSync((v) => !v)}
-            className="w-full flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40 text-left"
+            className="w-full flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40 text-left cursor-pointer hover:bg-zinc-700/80 transition-colors"
           >
             <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
             <div className="min-w-0 flex-1">
