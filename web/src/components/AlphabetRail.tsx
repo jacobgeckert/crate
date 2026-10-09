@@ -14,13 +14,18 @@ export default function AlphabetRail({ activeLetters }: AlphabetRailProps) {
   const scrollToLetter = useCallback((letter: string) => {
     const el = document.getElementById(`section-${letter}`);
     if (!el) return;
-    // Measure the pinned toolbar's real height rather than trusting a
-    // scroll-margin constant — zoom and font metrics change its px size.
-    const barBottom = document.getElementById('watchlist-toolbar')?.getBoundingClientRect().bottom ?? 0;
-    window.scrollTo({
-      top: el.getBoundingClientRect().top + window.scrollY - barBottom - 8,
-      behavior: 'smooth',
-    });
+    // #root is the scroll container (html/body are fixed & overflow-hidden),
+    // and the pinned toolbar's px height shifts with zoom — measure both.
+    const scroller = document.getElementById('root');
+    const barH = document.getElementById('watchlist-toolbar')?.getBoundingClientRect().height ?? 0;
+    if (scroller) {
+      scroller.scrollTo({
+        top: el.getBoundingClientRect().top + scroller.scrollTop - barH - 8,
+        behavior: 'smooth',
+      });
+    } else {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }, []);
 
   const getLetterFromY = useCallback((clientY: number) => {
