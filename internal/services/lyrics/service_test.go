@@ -211,3 +211,67 @@ func TestMarkTracks(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchAlbumPlainFallback(t *testing.T) {
+	s, q, libDir := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/get":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"plainLyrics": "just words, no timing", "duration": 201.0}`))
+		case "/api/search":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	album := seed(t, q)
+	rel := "Test Artist/Test Album/01 - Song.flac"
+	writeFile(t, filepath.Join(libDir, rel))
+	addTrack(t, q, album.ID, "Song", rel, models.TrackStatusOwned)
+
+	rep, err := s.FetchAlbum(context.Background(), album)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Plain != 1 || rep.Fetched != 0 {
+		t.Fatalf("report = %+v, want plain=1", rep)
+	}
+	content, err := os.ReadFile(filepath.Join(libDir, "Test Artist/Test Album/01 - Song.txt"))
+	if err != nil {
+		t.Fatal("no .txt sidecar written")
+	}
+	if string(content) != "just words, no timing" {
+		t.Errorf("txt content = %q", content)
+	}
+}
+
+func TestFetchAlbumPlainUpgradesToSynced(t *testing.T) {
+	s, q, libDir := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/get" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"syncedLyrics": "[00:01.00] hello\n", "duration": 201.0}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	album := seed(t, q)
+	rel := "Test Artist/Test Album/01 - Song.flac"
+	writeFile(t, filepath.Join(libDir, rel))
+	writeFile(t, filepath.Join(libDir, "Test Artist/Test Album/01 - Song.txt"))
+	addTrack(t, q, album.ID, "Song", rel, models.TrackStatusOwned)
+
+	rep, err := s.FetchAlbum(context.Background(), album)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Fetched != 1 {
+		t.Fatalf("report = %+v, want fetched=1", rep)
+	}
+	if _, err := os.Stat(filepath.Join(libDir, "Test Artist/Test Album/01 - Song.lrc")); err != nil {
+		t.Fatal("no .lrc sidecar written")
+	}
+	if _, err := os.Stat(filepath.Join(libDir, "Test Artist/Test Album/01 - Song.txt")); !os.IsNotExist(err) {
+		t.Fatal("stale .txt not swept after synced upgrade")
+	}
+}

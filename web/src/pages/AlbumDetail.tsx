@@ -76,11 +76,12 @@ export default function AlbumDetail() {
     mutationFn: () => api.fetchAlbumLyrics(Number(id)),
     onSuccess: (rep) => {
       const parts = [
-        rep.fetched > 0 ? `${rep.fetched} fetched` : null,
+        rep.fetched > 0 ? `${rep.fetched} synced` : null,
+        rep.plain > 0 ? `${rep.plain} plain` : null,
         rep.missing > 0 ? `${rep.missing} not found` : null,
         rep.skipped > 0 ? `${rep.skipped} skipped` : null,
       ].filter(Boolean).join(', ');
-      toast(rep.fetched > 0 ? `Synced lyrics — ${parts}` : `Synced lyrics — ${parts || 'nothing to fetch'}`, rep.fetched > 0 ? 'success' : 'error');
+      toast(rep.fetched + rep.plain > 0 ? `Lyrics — ${parts}` : `Lyrics — ${parts || 'nothing to fetch'}`, rep.fetched + rep.plain > 0 ? 'success' : 'error');
       queryClient.invalidateQueries({ queryKey: ['album', id] });
     },
     onError: (err: Error) => toast(err.message, 'error'),

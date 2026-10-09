@@ -143,7 +143,7 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 					slog.Warn("sync: lyrics fetch failed", "artist", name, "album", albums[i].Title, "error", ferr)
 					continue
 				}
-				lyricsFetched += rep.Fetched
+				lyricsFetched += rep.Fetched + rep.Plain
 			}
 		}
 	}

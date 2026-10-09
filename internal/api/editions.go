@@ -152,7 +152,7 @@ func (s *Server) handleRefreshAlbum(w http.ResponseWriter, r *http.Request) {
 			if rep, lerr := s.lyrics.FetchAlbum(ctx, album); lerr != nil {
 				slog.Warn("refresh: lyrics fetch failed", "album", title, "error", lerr)
 			} else {
-				fetched = rep.Fetched
+				fetched = rep.Fetched + rep.Plain
 			}
 		}
 

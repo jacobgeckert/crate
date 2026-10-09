@@ -41,9 +41,10 @@ type Service struct {
 }
 
 type Report struct {
-	Fetched int `json:"fetched"` // .lrc written
+	Fetched int `json:"fetched"` // synced .lrc written
+	Plain   int `json:"plain"`   // plain-text .txt written (no synced lyrics available)
 	Skipped int `json:"skipped"` // sidecar exists, not owned, or file outside the library
-	Missing int `json:"missing"` // LRCLIB had no synced lyrics
+	Missing int `json:"missing"` // LRCLIB had no lyrics at all
 }
 
 func NewService(queries *db.Queries, libraryDir string) *Service {
@@ -72,6 +73,8 @@ func (s *Service) FetchAlbum(ctx context.Context, album *models.Album) (*Report,
 		switch res {
 		case resultFetched:
 			rep.Fetched++
+		case resultPlain:
+			rep.Plain++
 		case resultSkipped:
 			rep.Skipped++
 		case resultMissing:
@@ -85,6 +88,7 @@ type result int
 
 const (
 	resultFetched result = iota
+	resultPlain
 	resultSkipped
 	resultMissing
 )
@@ -105,46 +109,73 @@ func (s *Service) hasSidecar(t *models.Track) bool {
 	if !library.Contains(s.libraryDir, abs) {
 		return false
 	}
-	lrcPath := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".lrc"
-	info, err := os.Stat(lrcPath)
-	return err == nil && !info.IsDir()
+	base := strings.TrimSuffix(abs, filepath.Ext(abs))
+	for _, ext := range []string{".lrc", ".txt"} {
+		info, err := os.Stat(base + ext)
+		if err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) fetchTrack(ctx context.Context, t *models.Track, artistName, albumTitle string) result {
-	if t.Status != models.TrackStatusOwned {
-		return resultSkipped
-	}
-	if s.hasSidecar(t) {
-		return resultSkipped // never clobber an existing sidecar
-	}
-	if t.FilePath == nil || *t.FilePath == "" {
+	if t.Status != models.TrackStatusOwned || t.FilePath == nil || *t.FilePath == "" {
 		return resultSkipped
 	}
 	abs := library.ResolvePath(s.libraryDir, *t.FilePath)
 	if !library.Contains(s.libraryDir, abs) {
 		return resultSkipped
 	}
-	lrcPath := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".lrc"
+	base := strings.TrimSuffix(abs, filepath.Ext(abs))
+	lrcPath, txtPath := base+".lrc", base+".txt"
+	if info, err := os.Stat(lrcPath); err == nil && !info.IsDir() {
+		return resultSkipped // synced sidecar is complete — never clobbered
+	}
 
-	lrc, err := s.lookup(ctx, artistName, t.Title, albumTitle, t.DurationMs/1000)
+	hit, err := s.lookup(ctx, artistName, t.Title, albumTitle, t.DurationMs/1000)
 	if err != nil {
 		slog.Warn("lyrics: lrclib lookup failed", "track", t.Title, "error", err)
 		return resultMissing
 	}
-	if lrc == "" {
+	if hit == nil || hit.text == "" {
 		return resultMissing
 	}
-	if err := os.WriteFile(lrcPath, []byte(lrc), 0644); err != nil { // #nosec G306 -- media sidecar, world-readable is fine
+	if !hit.synced {
+		// Plain lyrics go in a .txt sidecar (Navidrome reads these too). A
+		// matching existing file means nothing changed — not a fresh fetch.
+		if prev, err := os.ReadFile(txtPath); err == nil && string(prev) == hit.text { // #nosec G304 -- path resolved inside the library dir above
+			return resultSkipped
+		}
+		if err := os.WriteFile(txtPath, []byte(hit.text), 0644); err != nil { // #nosec G306 -- media sidecar, world-readable is fine
+			slog.Warn("lyrics: write sidecar", "path", txtPath, "error", err)
+			return resultMissing
+		}
+		return resultPlain
+	}
+	if err := os.WriteFile(lrcPath, []byte(hit.text), 0644); err != nil { // #nosec G306 -- media sidecar, world-readable is fine
 		slog.Warn("lyrics: write sidecar", "path", lrcPath, "error", err)
 		return resultMissing
+	}
+	// Synced arrived — the plain-text fallback is superseded.
+	if err := os.Remove(txtPath); err != nil && !os.IsNotExist(err) {
+		slog.Warn("lyrics: remove superseded txt", "path", txtPath, "error", err)
 	}
 	return resultFetched
 }
 
-// lookup tries the exact-match endpoint first, then the search fallback. It
-// returns the LRC payload, "" when nothing usable exists, or an error for
-// transport/server failures.
-func (s *Service) lookup(ctx context.Context, artist, title, album string, durationSec int) (string, error) {
+// lyricHit is a usable lyrics payload — synced (.lrc) or plain text (.txt)
+// when no synced version exists.
+type lyricHit struct {
+	text   string
+	synced bool
+}
+
+// lookup tries the exact-match endpoint first, then the search fallback.
+// Preference order: synced from /api/get → synced from search → plain from
+// /api/get → plain from search. Returns nil when nothing usable exists, or an
+// error for transport/server failures.
+func (s *Service) lookup(ctx context.Context, artist, title, album string, durationSec int) (*lyricHit, error) {
 	time.Sleep(requestDelay)
 
 	q := url.Values{
@@ -157,17 +188,21 @@ func (s *Service) lookup(ctx context.Context, artist, title, album string, durat
 	}
 	resp, err := s.get(ctx, "/api/get?"+q.Encode())
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if resp != nil && resp.SyncedLyrics != "" {
-		return resp.SyncedLyrics, nil
+		return &lyricHit{text: resp.SyncedLyrics, synced: true}, nil
 	}
 	if resp != nil && resp.Instrumental {
-		return "", nil // instrumentals carry no lyrics by definition
+		return nil, nil // instrumentals carry no lyrics by definition
+	}
+	plainGet := ""
+	if resp != nil {
+		plainGet = resp.PlainLyrics
 	}
 
 	// Fallback: search, then take the closest-duration candidate that has
-	// synced lyrics.
+	// synced lyrics — tracking the closest plain-lyrics candidate too.
 	q = url.Values{
 		"artist_name": {artist},
 		"track_name":  {title},
@@ -175,12 +210,14 @@ func (s *Service) lookup(ctx context.Context, artist, title, album string, durat
 	}
 	results, err := s.search(ctx, "/api/search?"+q.Encode())
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	best := ""
+	bestPlain := ""
 	bestDiff := float64(durationToleranceSec + 1)
+	bestPlainDiff := float64(durationToleranceSec + 1)
 	for _, r := range results {
-		if r.SyncedLyrics == "" || r.Instrumental {
+		if r.Instrumental {
 			continue
 		}
 		diff := float64(durationToleranceSec) // no duration to compare → accept at the edge
@@ -191,16 +228,30 @@ func (s *Service) lookup(ctx context.Context, artist, title, album string, durat
 			}
 			diff = d
 		}
-		if diff < bestDiff {
+		if r.SyncedLyrics != "" && diff < bestDiff {
 			best = r.SyncedLyrics
 			bestDiff = diff
 		}
+		if r.PlainLyrics != "" && diff < bestPlainDiff {
+			bestPlain = r.PlainLyrics
+			bestPlainDiff = diff
+		}
 	}
-	return best, nil
+	if best != "" {
+		return &lyricHit{text: best, synced: true}, nil
+	}
+	if plainGet != "" {
+		return &lyricHit{text: plainGet}, nil // exact match's plain text wins
+	}
+	if bestPlain != "" {
+		return &lyricHit{text: bestPlain}, nil
+	}
+	return nil, nil
 }
 
 type lrclibResult struct {
 	SyncedLyrics string  `json:"syncedLyrics"`
+	PlainLyrics  string  `json:"plainLyrics"`
 	Instrumental bool    `json:"instrumental"`
 	Duration     float64 `json:"duration"` // LRCLIB returns floats (e.g. 220.0, 238.64)
 }

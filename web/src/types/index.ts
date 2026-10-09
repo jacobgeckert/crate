@@ -380,6 +380,7 @@ export interface AlbumCoverCandidate {
 
 export interface LyricsReport {
   fetched: number;
+  plain: number;
   skipped: number;
   missing: number;
 }
