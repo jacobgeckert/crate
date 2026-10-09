@@ -244,7 +244,7 @@ export default function Library() {
 
   return (
     <div className="relative">
-      <div className="sticky top-0 z-30 -mx-4 bg-zinc-950 px-4 pt-1 pb-2">
+      <div id="watchlist-toolbar" className="sticky top-0 z-30 -mx-4 bg-zinc-950 px-4 pt-1 pb-2">
       <h2 className="text-lg font-bold mb-3">Watchlist</h2>
 
       <div className="flex items-start gap-2">

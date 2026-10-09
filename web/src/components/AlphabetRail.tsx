@@ -13,9 +13,14 @@ export default function AlphabetRail({ activeLetters }: AlphabetRailProps) {
 
   const scrollToLetter = useCallback((letter: string) => {
     const el = document.getElementById(`section-${letter}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    if (!el) return;
+    // Measure the pinned toolbar's real height rather than trusting a
+    // scroll-margin constant — zoom and font metrics change its px size.
+    const barBottom = document.getElementById('watchlist-toolbar')?.getBoundingClientRect().bottom ?? 0;
+    window.scrollTo({
+      top: el.getBoundingClientRect().top + window.scrollY - barBottom - 8,
+      behavior: 'smooth',
+    });
   }, []);
 
   const getLetterFromY = useCallback((clientY: number) => {
