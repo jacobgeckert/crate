@@ -28,6 +28,7 @@ export default function Library() {
   // IDs queued by the bulk-refresh action — the sync-status poll is scoped to
   // these so stale entries for other artists don't confuse the progress bar.
   const [refreshIds, setRefreshIds] = useState<number[]>([]);
+  const [expandSync, setExpandSync] = useState(false);
   const seenSync = useRef(false);
   const syncTicks = useRef(0);
   const [sort, setSort] = useState<LibrarySort>(
@@ -371,25 +372,78 @@ export default function Library() {
       )}
 
       {(refreshIds.length > 0 || ambientSyncs.length > 0) && (
-        <div className={`fixed ${floatClass} left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40`}>
-          <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
-          <div className="min-w-0">
-            <p className="text-xs text-zinc-300 whitespace-nowrap">
-              {refreshIds.length > 0
-                ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active).length} of ${refreshIds.length} artists`
-                : `Syncing discography — ${ambientSyncs.length} artist(s)`}
-            </p>
-            {(() => {
-              const active = refreshSync.find((i) => i.active);
-              if (!active) return null;
-              const name = filteredArtists.find((a) => a.id === active.artist_id)?.name ?? 'artist';
-              return (
-                <p className="text-[10px] text-zinc-500 truncate">
-                  {name}{active.total > 0 ? ` — ${active.done}/${active.total}` : ''}{active.current ? `: ${active.current}` : ''}
-                </p>
-              );
-            })()}
-          </div>
+        <div className={`fixed ${floatClass} left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-sm`}>
+          <button
+            onClick={() => setExpandSync((v) => !v)}
+            className="w-full flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40 text-left"
+          >
+            <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-zinc-300 whitespace-nowrap">
+                {refreshIds.length > 0
+                  ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active).length} of ${refreshIds.length} artists`
+                  : `Syncing discography — ${ambientSyncs.length} artist(s)`}
+              </p>
+              {!expandSync && (() => {
+                const active = refreshSync.find((i) => i.active);
+                if (!active) return null;
+                const name = filteredArtists.find((a) => a.id === active.artist_id)?.name ?? 'artist';
+                return (
+                  <p className="text-[10px] text-zinc-500 truncate">
+                    {name}{active.total > 0 ? ` — ${active.done}/${active.total}` : ''}{active.current ? `: ${active.current}` : ''}
+                  </p>
+                );
+              })()}
+            </div>
+            <svg
+              className={`w-3.5 h-3.5 text-zinc-500 shrink-0 transition-transform ${expandSync ? '' : 'rotate-180'}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+
+          {expandSync && (
+            <div className="mt-1.5 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl shadow-black/40 max-h-56 overflow-y-auto">
+              {(() => {
+                const items = syncStatus?.items ?? [];
+                const nameFor = (id: number) =>
+                  artists?.find((a) => a.id === id)?.name ?? `Artist #${id}`;
+                // refreshIds are the queued set; ambient actives not in it
+                // (started on another device) get appended at the end.
+                const ids = refreshIds.length > 0
+                  ? [...refreshIds, ...ambientSyncs.map((i) => i.artist_id).filter((id) => !refreshIds.includes(id))]
+                  : ambientSyncs.map((i) => i.artist_id);
+                return ids.map((artistId) => {
+                  const item = items.find((i) => i.artist_id === artistId);
+                  const queued = item?.active && item.phase === 'queued';
+                  const syncing = item?.active && !queued;
+                  return (
+                    <div key={artistId} className="flex items-center gap-2.5 px-3 py-2 border-b border-zinc-700/60 last:border-0">
+                      {queued ? (
+                        <svg className="w-3.5 h-3.5 text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+                      ) : syncing ? (
+                        <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-zinc-200 truncate">{nameFor(artistId)}</p>
+                        {queued && <p className="text-[10px] text-zinc-500">waiting for another sync…</p>}
+                        {syncing && (
+                          <p className="text-[10px] text-zinc-500 truncate">
+                            {item!.total > 0 ? `${item!.done}/${item!.total}` : 'contacting provider…'}
+                            {item!.current ? ` — ${item!.current}` : ''}
+                          </p>
+                        )}
+                        {!item?.active && <p className="text-[10px] text-zinc-600">done</p>}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
         </div>
       )}
     </div>
