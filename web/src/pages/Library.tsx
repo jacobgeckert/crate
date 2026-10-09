@@ -305,9 +305,9 @@ export default function Library() {
           </div>
         )}
         {sort === 'az' && grouped.map(({ letter, artists: group }) => (
-          <div key={letter} id={`section-${letter}`}>
+          <div key={letter} id={`section-${letter}`} className="scroll-mt-28">
             {grouped.length > 1 && (
-              <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1 first:mt-0 scroll-mt-32">
+              <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-3 mb-1 first:mt-0">
                 {letter}
               </p>
             )}
