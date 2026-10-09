@@ -373,38 +373,8 @@ export default function Library() {
 
       {(refreshIds.length > 0 || ambientSyncs.length > 0) && (
         <div className={`fixed ${floatClass} left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-sm`}>
-          <button
-            onClick={() => setExpandSync((v) => !v)}
-            className="w-full flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40 text-left"
-          >
-            <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs text-zinc-300 whitespace-nowrap">
-                {refreshIds.length > 0
-                  ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active).length} of ${refreshIds.length} artists`
-                  : `Syncing discography — ${ambientSyncs.length} artist(s)`}
-              </p>
-              {!expandSync && (() => {
-                const active = refreshSync.find((i) => i.active);
-                if (!active) return null;
-                const name = filteredArtists.find((a) => a.id === active.artist_id)?.name ?? 'artist';
-                return (
-                  <p className="text-[10px] text-zinc-500 truncate">
-                    {name}{active.total > 0 ? ` — ${active.done}/${active.total}` : ''}{active.current ? `: ${active.current}` : ''}
-                  </p>
-                );
-              })()}
-            </div>
-            <svg
-              className={`w-3.5 h-3.5 text-zinc-500 shrink-0 transition-transform ${expandSync ? '' : 'rotate-180'}`}
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </button>
-
           {expandSync && (
-            <div className="mt-1.5 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl shadow-black/40 max-h-56 overflow-y-auto">
+            <div className="mb-1.5 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl shadow-black/40 max-h-56 overflow-y-auto">
               {(() => {
                 const items = syncStatus?.items ?? [];
                 const nameFor = (id: number) =>
@@ -444,6 +414,36 @@ export default function Library() {
               })()}
             </div>
           )}
+
+          <button
+            onClick={() => setExpandSync((v) => !v)}
+            className="w-full flex items-center gap-2.5 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 shadow-xl shadow-black/40 text-left"
+          >
+            <div className="w-3.5 h-3.5 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-zinc-300 whitespace-nowrap">
+                {refreshIds.length > 0
+                  ? `Refreshing discographies — ${refreshSync.filter((i) => !i.active).length} of ${refreshIds.length} artists`
+                  : `Syncing discography — ${ambientSyncs.length} artist(s)`}
+              </p>
+              {!expandSync && (() => {
+                const active = refreshSync.find((i) => i.active);
+                if (!active) return null;
+                const name = filteredArtists.find((a) => a.id === active.artist_id)?.name ?? 'artist';
+                return (
+                  <p className="text-[10px] text-zinc-500 truncate">
+                    {name}{active.total > 0 ? ` — ${active.done}/${active.total}` : ''}{active.current ? `: ${active.current}` : ''}
+                  </p>
+                );
+              })()}
+            </div>
+            <svg
+              className={`w-3.5 h-3.5 text-zinc-500 shrink-0 transition-transform ${expandSync ? '' : 'rotate-180'}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
         </div>
       )}
     </div>
