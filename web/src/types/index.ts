@@ -376,3 +376,9 @@ export interface AlbumCoverCandidate {
   cover_url: string;
   provider: string;
 }
+
+export interface LyricsReport {
+  fetched: number;
+  skipped: number;
+  missing: number;
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/services/concerts"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/lyrics"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/organizer"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/upload"
@@ -35,6 +36,7 @@ type Server struct {
 	uploads     *upload.Service
 	organizer   *organizer.Service
 	concerts    *concerts.Service
+	lyrics      *lyrics.Service
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
@@ -68,6 +70,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		uploads:     up,
 		organizer:   org,
 		concerts:    concerts.NewService(queries, c),
+		lyrics:      lyrics.NewService(queries, libraryDir),
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,
@@ -146,6 +149,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Put("/{id}/edition", s.handleSetAlbumEdition)
 			r.Post("/{id}/split-tracks", s.handleSplitTracks)
 			r.Post("/{id}/refresh", s.handleRefreshAlbum)
+			r.Post("/{id}/lyrics", s.handleFetchAlbumLyrics)
 			r.Post("/{id}/queue", s.handleQueueAlbumTracks)
 			r.Post("/{id}/link", s.handleLinkAlbum)
 			r.Put("/{id}/ignore", s.handleIgnoreAlbum)

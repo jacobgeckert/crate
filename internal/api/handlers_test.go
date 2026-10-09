@@ -3076,7 +3076,9 @@ func TestListArtistsExcludesUpcomingReleases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	future, past, today := "2999-01-01", "2000-01-01", time.Now().Format("2006-01-02")
+	// UTC: SQLite's date('now') in the join is UTC — local time can be a day
+	// behind near midnight and leak the "today" album into the counts.
+	future, past, today := "2999-01-01", "2000-01-01", time.Now().UTC().Format("2006-01-02")
 	nextYear, oldYear := time.Now().Year()+1, 2000
 	cases := []struct {
 		date *string

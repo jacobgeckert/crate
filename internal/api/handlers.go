@@ -820,6 +820,31 @@ func (s *Server) handleAlbumCoverCandidates(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
 }
 
+// handleFetchAlbumLyrics pulls LRCLIB synced lyrics for the album's owned
+// tracks and writes .lrc sidecars next to the files (in-library only).
+func (s *Server) handleFetchAlbumLyrics(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	album, err := s.queries.GetAlbum(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "album not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get album")
+		return
+	}
+	rep, err := s.lyrics.FetchAlbum(r.Context(), album)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch lyrics")
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
 // handleSetAlbumCover sets (or clears, with an empty URL) an album's cover —
 // the manual override for the auto-picked Cover Art Archive / Deezer art.
 func (s *Server) handleSetAlbumCover(w http.ResponseWriter, r *http.Request) {

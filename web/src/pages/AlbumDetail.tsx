@@ -59,6 +59,19 @@ export default function AlbumDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  const fetchLyrics = useMutation({
+    mutationFn: () => api.fetchAlbumLyrics(Number(id)),
+    onSuccess: (rep) => {
+      const parts = [
+        rep.fetched > 0 ? `${rep.fetched} fetched` : null,
+        rep.missing > 0 ? `${rep.missing} not found` : null,
+        rep.skipped > 0 ? `${rep.skipped} skipped` : null,
+      ].filter(Boolean).join(', ');
+      toast(rep.fetched > 0 ? `Synced lyrics — ${parts}` : `Synced lyrics — ${parts || 'nothing to fetch'}`, rep.fetched > 0 ? 'success' : 'error');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   // A local album is an unmatched import — load its artist so the user can link
   // it to one of the sibling releases the reconcile already pulled in.
   const { data: artistForLink } = useQuery({
@@ -482,6 +495,18 @@ export default function AlbumDetail() {
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m6 4 14 8-14 8V4Z" />
+            </svg>
+          </button>
+        )}
+        {playQueue.length > 0 && (
+          <button
+            onClick={() => fetchLyrics.mutate()}
+            disabled={fetchLyrics.isPending}
+            className="p-1.5 rounded-lg transition-colors shrink-0 text-zinc-500 bg-zinc-800 active:bg-zinc-700 disabled:opacity-50"
+            title="Fetch synced lyrics from LRCLIB (writes .lrc files next to tracks)"
+          >
+            <svg className={`w-4 h-4 ${fetchLyrics.isPending ? 'animate-pulse' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v1a7 7 0 0 1-14 0v-1" /><path d="M12 18v4" /><path d="M8 22h8" />
             </svg>
           </button>
         )}

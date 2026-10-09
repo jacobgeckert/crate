@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, AlbumCoverCandidate } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, AlbumCoverCandidate, LyricsReport } from '../types/index';
 
 const BASE = '/api';
 
@@ -106,6 +106,8 @@ export const api = {
     request<void>(`/artists/${id}`, { method: 'DELETE' }),
   getAlbumCoverCandidates: (id: number) =>
     request<{ candidates: AlbumCoverCandidate[] }>(`/albums/${id}/covers`),
+  fetchAlbumLyrics: (id: number) =>
+    request<LyricsReport>(`/albums/${id}/lyrics`, { method: 'POST' }),
   setAlbumCover: (id: number, coverUrl: string) =>
     request<{ ok: boolean }>(`/albums/${id}/cover`, {
       method: 'PUT',
