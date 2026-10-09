@@ -178,14 +178,14 @@ func (s *Service) lookup(ctx context.Context, artist, title, album string, durat
 		return "", err
 	}
 	best := ""
-	bestDiff := durationToleranceSec + 1
+	bestDiff := float64(durationToleranceSec + 1)
 	for _, r := range results {
 		if r.SyncedLyrics == "" || r.Instrumental {
 			continue
 		}
-		diff := durationToleranceSec // no duration to compare → accept at the edge
+		diff := float64(durationToleranceSec) // no duration to compare → accept at the edge
 		if durationSec > 0 && r.Duration > 0 {
-			d := durationSec - r.Duration
+			d := float64(durationSec) - r.Duration
 			if d < 0 {
 				d = -d
 			}
@@ -200,9 +200,9 @@ func (s *Service) lookup(ctx context.Context, artist, title, album string, durat
 }
 
 type lrclibResult struct {
-	SyncedLyrics string `json:"syncedLyrics"`
-	Instrumental bool   `json:"instrumental"`
-	Duration     int    `json:"duration"`
+	SyncedLyrics string  `json:"syncedLyrics"`
+	Instrumental bool    `json:"instrumental"`
+	Duration     float64 `json:"duration"` // LRCLIB returns floats (e.g. 220.0, 238.64)
 }
 
 // get hits /api/get — returns (nil, nil) on a clean 404 no-match.

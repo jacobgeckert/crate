@@ -80,7 +80,7 @@ func TestFetchAlbumWritesLRC(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/get":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"syncedLyrics": "[00:01.00] hello\n[00:02.00] world\n", "duration": 201}`))
+			w.Write([]byte(`{"syncedLyrics": "[00:01.00] hello\n[00:02.00] world\n", "duration": 201.0}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -134,8 +134,8 @@ func TestFetchAlbumSearchFallback(t *testing.T) {
 		case "/api/search":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[
-				{"syncedLyrics": "far off", "duration": 999},
-				{"syncedLyrics": "[00:01.00] hello\n[00:02.00] world\n", "duration": 202}
+				{"syncedLyrics": "far off", "duration": 999.5},
+				{"syncedLyrics": "[00:01.00] hello\n[00:02.00] world\n", "duration": 202.0}
 			]`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
