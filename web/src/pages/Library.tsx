@@ -427,7 +427,7 @@ export default function Library() {
                   : `Syncing discography — ${ambientSyncs.length} artist(s)`}
               </p>
               {!expandSync && (() => {
-                const active = refreshSync.find((i) => i.active);
+                const active = refreshSync.find((i) => i.active && i.phase !== 'queued');
                 if (!active) return null;
                 const name = filteredArtists.find((a) => a.id === active.artist_id)?.name ?? 'artist';
                 return (
