@@ -1,9 +1,9 @@
 // Package concerts finds upcoming Ticketmaster shows for watched artists.
 //
-// One Discovery API call fetches every music event near the configured postal
-// code; event attractions are then name-matched against the watchlist. The raw
-// event feed is cached (not the matched shows) so newly watched artists match
-// immediately without another API call.
+// One Discovery keyword query per artist fetches that artist's events near the
+// configured postal code; event attractions are then name-verified against the
+// artist so fuzzy keyword matches can't leak in. Per-artist feeds are cached so
+// repeat page loads are free and a refresh only re-queries stale artists.
 package concerts
 
 import (
@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -32,7 +33,8 @@ const (
 	defaultBaseURL = "https://app.ticketmaster.com/discovery/v2"
 	defaultRadius  = "50"
 	cacheTTL       = 12 * time.Hour
-	maxPages       = 3 // 200/page — 600 events covers even dense metros
+	maxPages       = 2                    // per artist — own-shows feeds are tiny
+	requestPace    = 210 * time.Millisecond // TM free tier allows ~5 req/s
 )
 
 var ErrNotConfigured = errors.New("concerts not configured: set ticketmaster_api_key and concerts_postal_code in settings")
@@ -77,6 +79,8 @@ func (s *Service) config() (apiKey, postal, radius, unit string, ok bool) {
 	unit, _ = s.queries.GetSetting(SettingUnit)
 	if unit != "km" {
 		unit = "miles"
+	} else {
+		unit = "kms" // Discovery API spells it "kms"
 	}
 	ok = apiKey != "" && postal != ""
 	return
@@ -89,48 +93,60 @@ func (s *Service) Configured() bool {
 }
 
 // Shows returns upcoming events whose attractions match watched artists.
+//
+// One Discovery keyword query per artist — a shared geo feed sorted by date
+// gets truncated (TM caps results) before reaching a niche show weeks out in
+// dense metros, but a single artist's own feed is always small enough to fit.
+// Attraction names are still verified per event so fuzzy keyword matches
+// (cover bands, festivals, unrelated events) can't leak in.
 func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 	apiKey, postal, radius, unit, ok := s.config()
 	if !ok {
 		return nil, ErrNotConfigured
 	}
 
-	events, err := s.events(ctx, apiKey, postal, radius, unit, refresh)
-	if err != nil {
-		return nil, err
-	}
-
 	artists, err := s.queries.ListArtists()
 	if err != nil {
 		return nil, fmt.Errorf("list artists: %w", err)
 	}
-	byName := make(map[string]int64, len(artists))
-	for _, a := range artists {
-		byName[normalizeName(a.Name)] = a.ID
-	}
 
 	var shows []Show
 	seen := make(map[string]bool)
-	for _, ev := range events {
-		for _, attr := range ev.Embedded.Attractions {
-			artistID, matched := byName[normalizeName(attr.Name)]
-			if !matched {
-				continue
+	var failures int
+	for _, a := range artists {
+		events, err := s.artistEvents(ctx, apiKey, a.Name, postal, radius, unit, refresh)
+		if err != nil {
+			failures++
+			slog.Warn("concerts: artist events fetch failed", "artist", a.Name, "error", err)
+			continue
+		}
+		want := normalizeName(a.Name)
+		for _, ev := range events {
+			for _, attr := range ev.Embedded.Attractions {
+				if normalizeName(attr.Name) != want {
+					continue
+				}
+				key := ev.ID + ":" + attr.ID
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				shows = append(shows, toShow(ev, attr.Name, a.ID))
 			}
-			key := ev.ID + ":" + attr.ID
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			shows = append(shows, toShow(ev, attr.Name, artistID))
 		}
 	}
+	if len(artists) > 0 && failures == len(artists) {
+		return nil, fmt.Errorf("ticketmaster unreachable: every artist query failed")
+	}
+	sort.Slice(shows, func(i, j int) bool { return shows[i].Date < shows[j].Date })
+	slog.Info("concerts: matched shows", "artists", len(artists), "failures", failures, "shows", len(shows))
 	return shows, nil
 }
 
-// events returns the raw event feed, from cache when fresh.
-func (s *Service) events(ctx context.Context, apiKey, postal, radius, unit string, refresh bool) ([]tmEvent, error) {
-	key := fmt.Sprintf("concerts:events:%s:%s:%s", strings.ToLower(postal), radius, unit)
+// artistEvents returns an artist's upcoming events near the configured postal
+// code, from cache when fresh.
+func (s *Service) artistEvents(ctx context.Context, apiKey, artist, postal, radius, unit string, refresh bool) ([]tmEvent, error) {
+	key := fmt.Sprintf("concerts:artist:%s:%s:%s:%s", normalizeName(artist), strings.ToLower(postal), radius, unit)
 	if !refresh && s.cache != nil {
 		if raw, hit := s.cache.Get(key); hit {
 			var events []tmEvent
@@ -140,7 +156,8 @@ func (s *Service) events(ctx context.Context, apiKey, postal, radius, unit strin
 		}
 	}
 
-	events, err := s.fetchEvents(ctx, apiKey, postal, radius, unit)
+	time.Sleep(requestPace) // stay under TM's ~5 req/s free tier
+	events, err := s.fetchArtistEvents(ctx, apiKey, artist, postal, radius, unit)
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +169,12 @@ func (s *Service) events(ctx context.Context, apiKey, postal, radius, unit strin
 	return events, nil
 }
 
-func (s *Service) fetchEvents(ctx context.Context, apiKey, postal, radius, unit string) ([]tmEvent, error) {
+func (s *Service) fetchArtistEvents(ctx context.Context, apiKey, artist, postal, radius, unit string) ([]tmEvent, error) {
 	var all []tmEvent
 	for page := 0; page < maxPages; page++ {
-		u := fmt.Sprintf("%s/events.json?apikey=%s&classificationName=music&postalCode=%s&radius=%s&unit=%s&size=200&sort=date,asc&startDateTime=%s&page=%d",
+		u := fmt.Sprintf("%s/events.json?apikey=%s&classificationName=music&keyword=%s&postalCode=%s&radius=%s&unit=%s&size=200&sort=date,asc&startDateTime=%s&page=%d",
 			s.baseURL,
-			url.QueryEscape(apiKey), url.QueryEscape(postal), url.QueryEscape(radius), unit,
+			url.QueryEscape(apiKey), url.QueryEscape(artist), url.QueryEscape(postal), url.QueryEscape(radius), unit,
 			time.Now().UTC().Format("2006-01-02T15:04:05Z"), page)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

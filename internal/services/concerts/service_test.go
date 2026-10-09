@@ -139,7 +139,7 @@ func TestShowsMatchesWatchedArtists(t *testing.T) {
 	if shows[1].ArtistName != "Offspring" {
 		t.Errorf("expected Offspring match, got %+v", shows[1])
 	}
-	if gotQuery == "" || !containsAll(gotQuery, "apikey=test-key", "postalCode=90210", "radius=25", "unit=miles", "classificationName=music") {
+	if gotQuery == "" || !containsAll(gotQuery, "apikey=test-key", "postalCode=90210", "radius=25", "unit=miles", "classificationName=music", "keyword=") {
 		t.Errorf("unexpected query: %s", gotQuery)
 	}
 }
@@ -161,7 +161,8 @@ func TestShowsUsesCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("first call: %d shows", len(first))
-	// Watch a new artist — matching must re-run against the cached feed.
+	// Watch a new artist — its own feed isn't cached, so one extra call,
+	// while the first artist still hits cache.
 	if err := queries.CreateArtist(&models.Artist{Name: "Offspring", Provider: "test", ProviderID: "y", Status: models.ArtistStatusWatched}); err != nil {
 		t.Fatal(err)
 	}
@@ -169,19 +170,19 @@ func TestShowsUsesCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 {
-		t.Errorf("expected 1 API call (cached), got %d", calls)
+	if calls != 2 {
+		t.Errorf("expected 2 API calls (new artist fetched, first cached), got %d", calls)
 	}
 	if len(shows) != 2 {
-		t.Errorf("expected new artist to match cached feed, got %d shows", len(shows))
+		t.Errorf("expected 2 matched shows, got %d", len(shows))
 	}
 
-	// refresh bypasses the cache.
+	// refresh bypasses the cache for every artist.
 	if _, err := s.Shows(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Errorf("expected refresh to hit the API, got %d calls", calls)
+	if calls != 4 {
+		t.Errorf("expected refresh to re-query both artists, got %d calls", calls)
 	}
 }
 
@@ -190,10 +191,13 @@ func TestShowsUpstreamError(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
 	configure(t, queries)
+	if err := queries.CreateArtist(&models.Artist{Name: "blink-182", Provider: "test", ProviderID: "x", Status: models.ArtistStatusWatched}); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := s.Shows(context.Background(), false)
 	if err == nil {
-		t.Fatal("expected error on non-200 response")
+		t.Fatal("expected error when every artist query fails")
 	}
 }
 
