@@ -180,3 +180,59 @@ func TestReenqueueDoesNotDuplicateActivePending(t *testing.T) {
 		t.Errorf("expected original source 'user' preserved, got %q", downloads[0].Source)
 	}
 }
+
+func TestAlbumHasActiveDownloads(t *testing.T) {
+	q := newTestQueries(t)
+	artist := &models.Artist{Name: "Test Artist", Provider: "test", ProviderID: "a1", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(artist); err != nil {
+		t.Fatal(err)
+	}
+	album := &models.Album{ArtistID: artist.ID, Title: "Test Album", Provider: "test", ProviderID: "al1", RecordType: "album", Status: models.AlbumStatusWatched}
+	if err := q.CreateAlbum(album); err != nil {
+		t.Fatal(err)
+	}
+	t1 := &models.Track{AlbumID: album.ID, Title: "One", TrackNumber: 1, DurationMs: 200000, Provider: "test", ProviderID: "t1", Status: models.TrackStatusWanted}
+	t2 := &models.Track{AlbumID: album.ID, Title: "Two", TrackNumber: 2, DurationMs: 200000, Provider: "test", ProviderID: "t2", Status: models.TrackStatusWanted}
+	if err := q.CreateTrack(t1); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.CreateTrack(t2); err != nil {
+		t.Fatal(err)
+	}
+
+	active, err := q.AlbumHasActiveDownloads(album.ID)
+	if err != nil || active {
+		t.Fatalf("wanted-only album: active = %v, err = %v", active, err)
+	}
+
+	if err := q.EnqueueDownload(t1.ID); err != nil {
+		t.Fatal(err)
+	}
+	active, err = q.AlbumHasActiveDownloads(album.ID)
+	if err != nil || !active {
+		t.Fatalf("pending queue row: active = %v, err = %v", active, err)
+	}
+
+	downloads, err := q.ListDownloads("")
+	if err != nil || len(downloads) != 1 {
+		t.Fatalf("ListDownloads = %d, err = %v", len(downloads), err)
+	}
+	if err := q.UpdateDownloadStatus(downloads[0].ID, models.DownloadStatusComplete, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.UpdateTrackStatus(t1.ID, models.TrackStatusOwned); err != nil {
+		t.Fatal(err)
+	}
+	active, err = q.AlbumHasActiveDownloads(album.ID)
+	if err != nil || active {
+		t.Fatalf("settled album (straggler still wanted): active = %v, err = %v", active, err)
+	}
+
+	if err := q.UpdateTrackStatus(t2.ID, models.TrackStatusDownloading); err != nil {
+		t.Fatal(err)
+	}
+	active, err = q.AlbumHasActiveDownloads(album.ID)
+	if err != nil || !active {
+		t.Fatalf("track mid-download: active = %v, err = %v", active, err)
+	}
+}

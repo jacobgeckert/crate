@@ -67,13 +67,15 @@ func main() {
 	slskdClient := slskd.NewClient(cfg.SlskdURL, cfg.SlskdAPIKey)
 	org := organizer.NewService(queries, cfg.DownloadsDir, cfg.LibraryPath)
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
+	lyricsSvc := lyrics.NewService(queries, cfg.LibraryPath)
+	dl.AddAlbumDoneListener(lyricsSvc)
 	dl.AddNotifier(navidrome.NewClient(queries))
 	if err := os.MkdirAll(cfg.UploadDir, 0755); err != nil {
 		slog.Error("failed to create upload dir", "error", err)
 		os.Exit(1)
 	}
 	upSvc := upload.NewService(queries, providerMgr, cfg.UploadDir, cfg.LibraryPath, actLog, dl)
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, filepath.Dir(cfg.DatabasePath), Version, upSvc, org, lyrics.NewService(queries, cfg.LibraryPath))
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, filepath.Dir(cfg.DatabasePath), Version, upSvc, org, lyricsSvc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

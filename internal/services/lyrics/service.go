@@ -56,6 +56,27 @@ func NewService(queries *db.Queries, libraryDir string) *Service {
 	}
 }
 
+// AlbumDownloaded implements the downloader's album-settled hook — fires
+// once an album's download batch finishes (the last track just completed or
+// the stragglers exhausted their attempts). Best-effort: failures are
+// logged, never surfaced.
+func (s *Service) AlbumDownloaded(ctx context.Context, albumID int64) {
+	album, err := s.queries.GetAlbum(albumID)
+	if err != nil || album == nil {
+		slog.Warn("lyrics: album-done fetch skipped", "album_id", albumID, "error", err)
+		return
+	}
+	rep, err := s.FetchAlbum(ctx, album)
+	if err != nil {
+		slog.Warn("lyrics: album-done fetch failed", "album", album.Title, "error", err)
+		return
+	}
+	if rep.Fetched+rep.Plain > 0 {
+		slog.Info("lyrics: fetched on download complete", "album", album.Title,
+			"synced", rep.Fetched, "plain", rep.Plain, "missing", rep.Missing)
+	}
+}
+
 // FetchAlbum pulls synced lyrics for every owned track on the album.
 func (s *Service) FetchAlbum(ctx context.Context, album *models.Album) (*Report, error) {
 	artist, err := s.queries.GetArtist(album.ArtistID)

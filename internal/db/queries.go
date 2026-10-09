@@ -392,6 +392,19 @@ func (q *Queries) AlbumHasOwnedOrActive(albumID int64) (bool, error) {
 	return has, err
 }
 
+// AlbumHasActiveDownloads reports whether an album still has download work in
+// flight — a track mid-download or a live queue row. Wanted-but-idle tracks
+// don't count: the album's current download batch has settled either way.
+func (q *Queries) AlbumHasActiveDownloads(albumID int64) (bool, error) {
+	var has bool
+	err := q.db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM tracks WHERE album_id = ? AND status = 'downloading')
+		      OR EXISTS(SELECT 1 FROM download_queue d JOIN tracks t ON t.id = d.track_id
+		                WHERE t.album_id = ? AND d.status IN ('pending', 'searching', 'downloading', 'organizing'))`,
+		albumID, albumID).Scan(&has)
+	return has, err
+}
+
 // ListWantedTrackIDsByAlbum returns ids of an album's wanted tracks — used to
 // enqueue them when an album is un-ignored.
 func (q *Queries) ListWantedTrackIDsByAlbum(albumID int64) ([]int64, error) {

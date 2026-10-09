@@ -49,12 +49,20 @@ type PostDownloadNotifier interface {
 	TriggerScan(ctx context.Context)
 }
 
+// AlbumDoneListener is notified when an album's download batch settles — no
+// tracks mid-download and no live queue rows left. Runs detached off the
+// tick loop so a slow listener doesn't stall other downloads.
+type AlbumDoneListener interface {
+	AlbumDownloaded(ctx context.Context, albumID int64)
+}
+
 type Service struct {
 	queries     *db.Queries
 	slskd       *slskd.Client
 	organizer   Organizer
 	activityLog *activity.Log
 	notifiers   []PostDownloadNotifier
+	albumDone   []AlbumDoneListener
 }
 
 func NewService(queries *db.Queries, slskdClient *slskd.Client, org Organizer, actLog *activity.Log) *Service {
@@ -63,6 +71,10 @@ func NewService(queries *db.Queries, slskdClient *slskd.Client, org Organizer, a
 
 func (s *Service) AddNotifier(n PostDownloadNotifier) {
 	s.notifiers = append(s.notifiers, n)
+}
+
+func (s *Service) AddAlbumDoneListener(l AlbumDoneListener) {
+	s.albumDone = append(s.albumDone, l)
 }
 
 func (s *Service) Notifiers() []PostDownloadNotifier {
@@ -622,7 +634,28 @@ func (s *Service) completeDownload(ctx context.Context, d models.DownloadQueueIt
 		return err
 	}
 	s.removeTransferRecord(ctx, d)
+	s.notifyAlbumDone(track.AlbumID)
 	return nil
+}
+
+// notifyAlbumDone fires album-done listeners when this completion leaves the
+// album with no remaining download work. Detached context — the tick's ctx
+// may end before a listener (e.g. a lyrics fetch) finishes its HTTP calls.
+func (s *Service) notifyAlbumDone(albumID int64) {
+	if len(s.albumDone) == 0 || albumID == 0 {
+		return
+	}
+	active, err := s.queries.AlbumHasActiveDownloads(albumID)
+	if err != nil {
+		slog.Warn("downloader: album-done check failed", "album_id", albumID, "error", err)
+		return
+	}
+	if active {
+		return
+	}
+	for _, l := range s.albumDone {
+		go l.AlbumDownloaded(context.Background(), albumID)
+	}
 }
 
 // removeTransferRecord drops a finished/dead transfer from slskd's downloads
