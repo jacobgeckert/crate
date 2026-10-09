@@ -384,7 +384,14 @@ export default function Library() {
                 const ids = refreshIds.length > 0
                   ? [...refreshIds, ...ambientSyncs.map((i) => i.artist_id).filter((id) => !refreshIds.includes(id))]
                   : ambientSyncs.map((i) => i.artist_id);
-                return ids.map((artistId) => {
+                // Work order, top to bottom: syncing now → queued in
+                // submission order (syncs run serially) → done.
+                const ordered = [
+                  ...ids.filter((id) => items.find((i) => i.artist_id === id)?.active && items.find((i) => i.artist_id === id)?.phase !== 'queued'),
+                  ...ids.filter((id) => items.find((i) => i.artist_id === id)?.phase === 'queued'),
+                  ...ids.filter((id) => !items.find((i) => i.artist_id === id)?.active),
+                ];
+                return ordered.map((artistId) => {
                   const item = items.find((i) => i.artist_id === artistId);
                   const queued = item?.active && item.phase === 'queued';
                   const syncing = item?.active && !queued;
