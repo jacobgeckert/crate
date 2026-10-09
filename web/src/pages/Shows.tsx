@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { useToast } from '../components/Toast';
 import type { Show } from '../types/index';
 
 function formatDate(iso: string): string {
@@ -33,13 +34,21 @@ function daysUntil(iso: string): string {
 
 export default function Shows() {
   const queryClient = useQueryClient();
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['concerts'],
     queryFn: () => api.getConcerts(),
   });
 
-  const refresh = () =>
-    api.getConcerts(true).then((d) => queryClient.setQueryData(['concerts'], d));
+  const { toast } = useToast();
+  const refresh = useMutation({
+    mutationFn: () => api.getConcerts(true),
+    onSuccess: (d) => {
+      queryClient.setQueryData(['concerts'], d);
+      const n = d.shows?.length ?? 0;
+      toast(n > 0 ? `Found ${n} upcoming show(s)` : 'No upcoming shows matched your artists', n > 0 ? 'success' : 'error');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
 
   const groups = useMemo(() => {
     const map = new Map<string, Show[]>();
@@ -66,11 +75,11 @@ export default function Shows() {
         <h1 className="text-xl font-bold">Shows</h1>
         {data?.configured && (
           <button
-            onClick={refresh}
-            disabled={isFetching}
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
             className="text-xs text-zinc-400 bg-zinc-800 rounded-lg px-3 py-1.5 active:bg-zinc-700 transition-colors disabled:opacity-50"
           >
-            {isFetching ? 'Refreshing…' : 'Refresh'}
+            {refresh.isPending ? 'Refreshing…' : 'Refresh'}
           </button>
         )}
       </div>
