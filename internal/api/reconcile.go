@@ -130,10 +130,28 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	}
 	s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "syncing releases", Total: total, Done: total})
 
+	// Refresh doubles as a lyrics backfill — pull LRCLIB synced lyrics for
+	// every owned track missing its .lrc sidecar, across all the artist's
+	// albums (local imports included). Existing sidecars cost only a stat.
+	lyricsFetched := 0
+	if s.lyrics != nil {
+		s.setSync(artistID, &models.SyncInfo{Active: true, Phase: "fetching lyrics"})
+		if albums, lerr := s.queries.ListAlbumsByArtist(artistID); lerr == nil {
+			for i := range albums {
+				rep, ferr := s.lyrics.FetchAlbum(ctx, &albums[i])
+				if ferr != nil {
+					slog.Warn("sync: lyrics fetch failed", "artist", name, "album", albums[i].Title, "error", ferr)
+					continue
+				}
+				lyricsFetched += rep.Fetched
+			}
+		}
+	}
+
 	slog.Info("sync: discography sync complete", "artist", name, "provider", providerName,
-		"provider_releases", len(albumList.Albums), "added", added, "local_matched", len(used))
+		"provider_releases", len(albumList.Albums), "added", added, "local_matched", len(used), "lyrics", lyricsFetched)
 	s.activityLog.Record("discography_sync", "artist", artistID, fmt.Sprintf(
-		"Synced %s from %s — %d release(s) added, %d local album(s) matched", name, providerName, added, len(used)))
+		"Synced %s from %s — %d release(s) added, %d local album(s) matched, %d lyrics", name, providerName, added, len(used), lyricsFetched))
 }
 
 // reconcileAlbumTracks reconciles one album's tracks against the provider's

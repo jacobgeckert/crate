@@ -143,10 +143,23 @@ func (s *Server) handleRefreshAlbum(w http.ResponseWriter, r *http.Request) {
 		s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Resolving cover art"})
 		s.enrichAlbumCover(ctx, albumID)
 
+		// Refresh doubles as a lyrics backfill — owned tracks missing their
+		// .lrc sidecar get one; tracks that already have one skip without a
+		// network call.
+		fetched := 0
+		if s.lyrics != nil {
+			s.setAlbumSync(albumID, &models.SyncInfo{Active: true, Phase: "Fetching lyrics"})
+			if rep, lerr := s.lyrics.FetchAlbum(ctx, album); lerr != nil {
+				slog.Warn("refresh: lyrics fetch failed", "album", title, "error", lerr)
+			} else {
+				fetched = rep.Fetched
+			}
+		}
+
 		slog.Info("refresh: album refreshed", "album", title, "provider", providerName,
-			"tracks", len(detail.Tracks), "added", added, "matched", matched, "merged", merged, "pruned", pruned)
+			"tracks", len(detail.Tracks), "added", added, "matched", matched, "merged", merged, "pruned", pruned, "lyrics", fetched)
 		s.activityLog.Record("album_refresh", "album", albumID, fmt.Sprintf(
-			"Refreshed %s from %s — %d track(s), %d added, %d removed", title, providerName, len(detail.Tracks), added, pruned))
+			"Refreshed %s from %s — %d track(s), %d added, %d removed, %d lyrics", title, providerName, len(detail.Tracks), added, pruned, fetched))
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})

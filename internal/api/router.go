@@ -58,7 +58,7 @@ type Server struct {
 	version    string
 }
 
-func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service, org *organizer.Service) *Server {
+func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string, up *upload.Service, org *organizer.Service, lyr *lyrics.Service) *Server {
 	s := &Server{
 		queries:     queries,
 		providers:   providers,
@@ -70,7 +70,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		uploads:     up,
 		organizer:   org,
 		concerts:    concerts.NewService(queries, c),
-		lyrics:      lyrics.NewService(queries, libraryDir),
+		lyrics:      lyr, // nil in tests — lyrics calls hit a live external API
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,

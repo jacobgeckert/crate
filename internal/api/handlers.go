@@ -656,7 +656,9 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	albums, _ := s.queries.ListAlbumsByArtist(id)
 	for i := range albums {
 		tracks, _ := s.queries.ListTracksByAlbum(albums[i].ID)
-		s.lyrics.MarkTracks(tracks)
+		if s.lyrics != nil {
+			s.lyrics.MarkTracks(tracks)
+		}
 		albums[i].Tracks = tracks
 	}
 	artist.Albums = albums
@@ -824,6 +826,10 @@ func (s *Server) handleAlbumCoverCandidates(w http.ResponseWriter, r *http.Reque
 // handleFetchAlbumLyrics pulls LRCLIB synced lyrics for the album's owned
 // tracks and writes .lrc sidecars next to the files (in-library only).
 func (s *Server) handleFetchAlbumLyrics(w http.ResponseWriter, r *http.Request) {
+	if s.lyrics == nil {
+		writeError(w, http.StatusServiceUnavailable, "lyrics service unavailable")
+		return
+	}
 	id, err := parseID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -926,7 +932,9 @@ func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tracks, _ := s.queries.ListTracksByAlbum(id)
-	s.lyrics.MarkTracks(tracks)
+	if s.lyrics != nil {
+		s.lyrics.MarkTracks(tracks)
+	}
 	album.Tracks = tracks
 	if v, ok := s.albumSync.Load(id); ok {
 		album.Sync = v.(*models.SyncInfo)

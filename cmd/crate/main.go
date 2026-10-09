@@ -18,6 +18,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/lyrics"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/musicassistant"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/navidrome"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/organizer"
@@ -71,7 +72,7 @@ func main() {
 		os.Exit(1)
 	}
 	upSvc := upload.NewService(queries, providerMgr, cfg.UploadDir, cfg.LibraryPath, actLog, dl)
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version, upSvc, org)
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version, upSvc, org, lyrics.NewService(queries, cfg.LibraryPath))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
