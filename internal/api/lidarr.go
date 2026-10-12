@@ -1047,7 +1047,7 @@ func diskStats(path string) (free, total uint64) {
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 100_000_000_000, 500_000_000_000
 	}
-	return stat.Bavail * uint64(stat.Bsize), stat.Blocks * uint64(stat.Bsize)
+	return stat.Bavail * uint64(stat.Bsize), stat.Blocks * uint64(stat.Bsize) // #nosec G115 -- statfs fields are non-negative block/byte counts
 }
 
 func lidarrMonitorNewItems(a *models.Artist) string {

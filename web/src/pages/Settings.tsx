@@ -231,6 +231,8 @@ export default function Settings() {
         </div>
       )}
 
+      <RemoteAccess apiKey={form.api_key} />
+
       {providers && providers.length > 0 && (
         <SettingsSection title="Providers">
           <div className="space-y-2 mb-4">
@@ -620,6 +622,118 @@ export default function Settings() {
         <p className="text-center text-xs text-zinc-600 mt-8">{status.version}</p>
       )}
     </div>
+  );
+}
+
+// Remote access login — off until credentials are saved, so LAN stays open.
+// Password changes and disabling both require the current password.
+function RemoteAccess({ apiKey }: { apiKey?: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [username, setUsername] = useState('');
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+
+  const { data: me } = useQuery({ queryKey: ['auth-me'], queryFn: api.authMe });
+  useEffect(() => {
+    if (me?.username) setUsername(me.username);
+  }, [me?.username]);
+
+  const save = useMutation({
+    mutationFn: () => api.updateCredentials({ current_password: current, username, password: next }),
+    onSuccess: () => {
+      setCurrent('');
+      setNext('');
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] });
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      toast(me?.enabled ? 'Login updated' : 'Login enabled — remote access is now protected', 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+  const disable = useMutation({
+    mutationFn: () => api.updateCredentials({ current_password: current, username: '', password: '' }),
+    onSuccess: () => {
+      setCurrent('');
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] });
+      toast('Login disabled', 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth-me'] }),
+  });
+
+  return (
+    <SettingsSection title="Remote Access">
+      <div className="bg-zinc-800/50 rounded-lg px-3 py-2.5 space-y-2.5">
+        <p className="text-xs text-zinc-500">
+          {me?.enabled
+            ? 'Login required for all remote and local access.'
+            : 'No login required — set a username and password before exposing Crate to the internet.'}
+        </p>
+        {me?.enabled && (
+          <input
+            type="password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            placeholder="Current password"
+            autoComplete="current-password"
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+          />
+        )}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            autoComplete="username"
+            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+          />
+          <input
+            type="password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            placeholder={me?.enabled ? 'New password' : 'Password'}
+            autoComplete="new-password"
+            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !username || !next || (me?.enabled && !current)}
+            className="flex-1 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 rounded-lg py-2 text-xs font-medium transition-colors"
+          >
+            {me?.enabled ? 'Update login' : 'Enable login'}
+          </button>
+          {me?.enabled && (
+            <>
+              <button
+                onClick={() => disable.mutate()}
+                disabled={disable.isPending || !current}
+                title="Requires current password"
+                className="px-3 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded-lg py-2 text-xs font-medium transition-colors"
+              >
+                Disable
+              </button>
+              <button
+                onClick={() => logout.mutate()}
+                className="px-3 bg-zinc-700 hover:bg-zinc-600 rounded-lg py-2 text-xs font-medium transition-colors"
+              >
+                Sign out
+              </button>
+            </>
+          )}
+        </div>
+        {me?.enabled && apiKey && (
+          <p className="text-[11px] text-zinc-500">
+            API key for Prowlarr/lidarr-compatible tools: <code className="text-zinc-300 break-all">{apiKey}</code>
+          </p>
+        )}
+      </div>
+    </SettingsSection>
   );
 }
 

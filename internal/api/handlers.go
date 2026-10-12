@@ -1677,6 +1677,8 @@ var hiddenSettings = map[string]bool{
 	"scan_interval":              true,
 	"download_format_preference": true,
 	"min_bitrate":                true,
+	"auth_password_hash":         true, // managed via /api/auth/credentials only
+	"auth_session_secret":        true,
 }
 
 const redactedPlaceholder = "••••••••"

@@ -384,3 +384,9 @@ export interface LyricsReport {
   skipped: number;
   missing: number;
 }
+
+export interface AuthStatus {
+  enabled: boolean;
+  authenticated: boolean;
+  username?: string;
+}

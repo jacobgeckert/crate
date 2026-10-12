@@ -102,12 +102,20 @@ func (s *Server) setupRouter() chi.Router {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:6969"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "X-Api-Key"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	r.Use(s.requireAuth)
 
 	r.Route("/api", func(r chi.Router) {
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/login", s.handleAuthLogin)
+			r.Post("/logout", s.handleAuthLogout)
+			r.Get("/me", s.handleAuthMe)
+			r.Put("/credentials", s.handleAuthCredentials)
+		})
+
 		r.Get("/status", s.handleStatus)
 
 		r.Get("/search", s.handleSearch)

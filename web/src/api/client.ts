@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, AlbumCoverCandidate, LyricsReport } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, AlbumCoverCandidate, LyricsReport, AuthStatus } from '../types/index';
 
 const BASE = '/api';
 
@@ -7,6 +7,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+  // Session died mid-use (rotated secret, expired, auth enabled elsewhere) —
+  // the auth gate listens for this and shows the login screen.
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    window.dispatchEvent(new Event('crate:auth-expired'));
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || res.statusText);
@@ -266,4 +271,11 @@ export const api = {
     }),
   discardUpload: (batch: string) =>
     request<void>(`/uploads/${batch}`, { method: 'DELETE' }),
+
+  authMe: () => request<AuthStatus>('/auth/me'),
+  login: (username: string, password: string) =>
+    request<AuthStatus>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  updateCredentials: (body: { current_password: string; username: string; password: string }) =>
+    request<{ enabled: boolean }>('/auth/credentials', { method: 'PUT', body: JSON.stringify(body) }),
 };

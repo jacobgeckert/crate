@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ErrorBoundary from './components/ErrorBoundary';
+import AuthGate from './components/AuthGate';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/Toast';
 import { PlayerProvider } from './components/Player';
@@ -34,6 +35,7 @@ export default function App() {
       <ToastProvider>
       <BrowserRouter>
       <PlayerProvider>
+        <AuthGate>
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Library />} />
@@ -51,6 +53,7 @@ export default function App() {
             <Route path="/settings/blocked" element={<BlockedSources />} />
           </Route>
         </Routes>
+        </AuthGate>
       </PlayerProvider>
       </BrowserRouter>
       </ToastProvider>
