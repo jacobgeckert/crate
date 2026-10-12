@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,7 +36,16 @@ var Version = "dev"
 var frontendDist embed.FS
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	logLevel := slog.LevelInfo
+	switch strings.ToLower(os.Getenv("CRATE_LOG_LEVEL")) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	cfg := config.Load()
 

@@ -17,11 +17,13 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/cache"
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
+	"github.com/TheOutdoorProgrammer/crate/internal/models"
 )
 
 const (
@@ -110,53 +112,98 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 		return nil, fmt.Errorf("list artists: %w", err)
 	}
 
+	type artistResult struct {
+		artist *models.Artist
+		events []tmEvent
+		err    error
+	}
+	// Shared pace gate: one slot every ~210ms no matter how many workers are
+	// waiting, keeping us under TM's ~5 req/s free tier. Concurrency overlaps
+	// HTTP latency, not quota.
+	tick := time.NewTicker(requestPace)
+	defer tick.Stop()
+
+	jobs := make(chan *models.Artist)
+	results := make(chan artistResult, len(artists))
+	var wg sync.WaitGroup
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for a := range jobs {
+				events, err := s.artistEvents(ctx, apiKey, a.Name, postal, radius, unit, refresh, tick.C)
+				results <- artistResult{a, events, err}
+			}
+		}()
+	}
+	go func() {
+		for i := range artists {
+			jobs <- &artists[i]
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+
 	var shows []Show
 	seen := make(map[string]bool)
-	var failures int
-	for _, a := range artists {
-		events, err := s.artistEvents(ctx, apiKey, a.Name, postal, radius, unit, refresh)
-		if err != nil {
-			failures++
-			slog.Warn("concerts: artist events fetch failed", "artist", a.Name, "error", err)
+	var failCount int
+	for res := range results {
+		if res.err != nil {
+			failCount++
+			slog.Warn("concerts: artist events fetch failed", "artist", res.artist.Name, "error", res.err)
 			continue
 		}
-		want := normalizeName(a.Name)
-		for _, ev := range events {
+		want := normalizeName(res.artist.Name)
+		var matched, seenNames int
+		var sample []string
+		for _, ev := range res.events {
 			for _, attr := range ev.Embedded.Attractions {
+				seenNames++
+				if len(sample) < 6 {
+					sample = append(sample, attr.Name)
+				}
 				if normalizeName(attr.Name) != want {
 					continue
 				}
+				matched++
 				key := ev.ID + ":" + attr.ID
 				if seen[key] {
 					continue
 				}
 				seen[key] = true
-				shows = append(shows, toShow(ev, attr.Name, a.ID))
+				shows = append(shows, toShow(ev, attr.Name, res.artist.ID))
 			}
 		}
+		slog.Debug("concerts: artist feed", "artist", res.artist.Name,
+			"events", len(res.events), "attractions", seenNames, "matched", matched,
+			"attraction_sample", sample)
 	}
-	if len(artists) > 0 && failures == len(artists) {
+	if len(artists) > 0 && failCount == len(artists) {
 		return nil, fmt.Errorf("ticketmaster unreachable: every artist query failed")
 	}
 	sort.Slice(shows, func(i, j int) bool { return shows[i].Date < shows[j].Date })
-	slog.Info("concerts: matched shows", "artists", len(artists), "failures", failures, "shows", len(shows))
+	slog.Info("concerts: matched shows", "artists", len(artists), "failures", failCount, "shows", len(shows))
 	return shows, nil
 }
 
 // artistEvents returns an artist's upcoming events near the configured postal
-// code, from cache when fresh.
-func (s *Service) artistEvents(ctx context.Context, apiKey, artist, postal, radius, unit string, refresh bool) ([]tmEvent, error) {
+// code, from cache when fresh. gate paces actual API calls against TM's rate
+// limit — workers share one ticker.
+func (s *Service) artistEvents(ctx context.Context, apiKey, artist, postal, radius, unit string, refresh bool, gate <-chan time.Time) ([]tmEvent, error) {
 	key := fmt.Sprintf("concerts:artist:%s:%s:%s:%s", normalizeName(artist), strings.ToLower(postal), radius, unit)
 	if !refresh && s.cache != nil {
 		if raw, hit := s.cache.Get(key); hit {
 			var events []tmEvent
 			if err := json.Unmarshal(raw, &events); err == nil {
+				slog.Debug("concerts: cache hit", "artist", artist, "events", len(events))
 				return events, nil
 			}
 		}
 	}
 
-	time.Sleep(requestPace) // stay under TM's ~5 req/s free tier
+	<-gate
+	slog.Debug("concerts: fetching artist events", "artist", artist, "postal", postal, "radius", radius, "unit", unit)
 	events, err := s.fetchArtistEvents(ctx, apiKey, artist, postal, radius, unit)
 	if err != nil {
 		return nil, err
