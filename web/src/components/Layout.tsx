@@ -133,13 +133,13 @@ export default function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-900/95 backdrop-blur-sm border-t border-zinc-800 safe-area-bottom z-50">
-        <div className="flex justify-around py-2">
+        <div className="flex overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {navItems.map(({ to, label, Icon }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex flex-col items-center gap-0.5 px-3 py-1 text-[11px] transition-colors ${
+                `flex-1 min-w-fit flex flex-col items-center gap-0.5 px-3 py-1 text-[11px] transition-colors ${
                   isActive ? 'text-white' : 'text-zinc-500'
                 }`
               }
