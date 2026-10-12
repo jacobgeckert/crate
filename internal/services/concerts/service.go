@@ -33,9 +33,11 @@ const (
 	SettingUnit       = "concerts_unit"
 
 	defaultBaseURL = "https://app.ticketmaster.com/discovery/v2"
+	defaultGeoURL  = "https://api.zippopotam.us" // postal→latlong, no key needed
 	defaultRadius  = "50"
 	cacheTTL       = 12 * time.Hour
-	maxPages       = 2                    // per artist — own-shows feeds are tiny
+	geoTTL         = 30 * 24 * time.Hour // postal codes don't move
+	maxPages       = 2                      // per artist — own-shows feeds are tiny
 	requestPace    = 210 * time.Millisecond // TM free tier allows ~5 req/s
 )
 
@@ -60,6 +62,7 @@ type Service struct {
 	cache   *cache.Cache
 	http    *http.Client
 	baseURL string // overridable for tests
+	geoURL  string // overridable for tests
 }
 
 func NewService(queries *db.Queries, c *cache.Cache) *Service {
@@ -68,6 +71,7 @@ func NewService(queries *db.Queries, c *cache.Cache) *Service {
 		cache:   c,
 		http:    &http.Client{Timeout: 15 * time.Second},
 		baseURL: defaultBaseURL,
+		geoURL:  defaultGeoURL,
 	}
 }
 
@@ -122,6 +126,7 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 	// HTTP latency, not quota.
 	tick := time.NewTicker(requestPace)
 	defer tick.Stop()
+	geo := s.geoParam(ctx, postal)
 
 	jobs := make(chan *models.Artist)
 	results := make(chan artistResult, len(artists))
@@ -131,7 +136,7 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 		go func() {
 			defer wg.Done()
 			for a := range jobs {
-				events, err := s.artistEvents(ctx, apiKey, a.Name, postal, radius, unit, refresh, tick.C)
+				events, err := s.artistEvents(ctx, apiKey, a.Name, geo, postal, radius, unit, refresh, tick.C)
 				results <- artistResult{a, events, err}
 			}
 		}()
@@ -187,10 +192,72 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 	return shows, nil
 }
 
+// geoParam resolves the configured postal code into Ticketmaster's latlong
+// geo filter. postalCode+radius is unreliable in Discovery queries — TM can
+// narrow to the zip itself and return zero events for shows clearly inside
+// the radius. latlong+radius is the supported radius search.
+func (s *Service) geoParam(ctx context.Context, postal string) string {
+	if ll := s.geocode(ctx, postal); ll != "" {
+		slog.Debug("concerts: postal geocoded", "postal", postal, "latlong", ll)
+		return "latlong=" + url.QueryEscape(ll)
+	}
+	slog.Debug("concerts: postal not geocoded, using postalCode filter", "postal", postal)
+	return "postalCode=" + url.QueryEscape(postal)
+}
+
+// geocode converts a US zip to "lat,long" via zippopotam.us. Returns "" for
+// non-US codes or lookup failures — the caller falls back to the raw
+// postalCode filter. Results cache for a month; zips don't move.
+func (s *Service) geocode(ctx context.Context, postal string) string {
+	if len(postal) != 5 {
+		return ""
+	}
+	for _, r := range postal {
+		if !unicode.IsDigit(r) {
+			return ""
+		}
+	}
+	key := "concerts:geo:" + postal
+	if s.cache != nil {
+		if raw, hit := s.cache.Get(key); hit {
+			if ll := strings.TrimSpace(string(raw)); ll != "" {
+				return ll
+			}
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.geoURL+"/us/"+url.PathEscape(postal), nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	resp.Body.Close() // #nosec G104 -- close error is irrelevant on a response body
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var geo struct {
+		Places []struct {
+			Lat  string `json:"latitude"`
+			Long string `json:"longitude"`
+		} `json:"places"`
+	}
+	if err := json.Unmarshal(body, &geo); err != nil || len(geo.Places) == 0 {
+		return ""
+	}
+	ll := geo.Places[0].Lat + "," + geo.Places[0].Long
+	if s.cache != nil {
+		s.cache.Set(key, []byte(ll), geoTTL)
+	}
+	return ll
+}
+
 // artistEvents returns an artist's upcoming events near the configured postal
 // code, from cache when fresh. gate paces actual API calls against TM's rate
 // limit — workers share one ticker.
-func (s *Service) artistEvents(ctx context.Context, apiKey, artist, postal, radius, unit string, refresh bool, gate <-chan time.Time) ([]tmEvent, error) {
+func (s *Service) artistEvents(ctx context.Context, apiKey, artist, geo, postal, radius, unit string, refresh bool, gate <-chan time.Time) ([]tmEvent, error) {
 	key := fmt.Sprintf("concerts:artist:%s:%s:%s:%s", normalizeName(artist), strings.ToLower(postal), radius, unit)
 	if !refresh && s.cache != nil {
 		if raw, hit := s.cache.Get(key); hit {
@@ -203,8 +270,8 @@ func (s *Service) artistEvents(ctx context.Context, apiKey, artist, postal, radi
 	}
 
 	<-gate
-	slog.Debug("concerts: fetching artist events", "artist", artist, "postal", postal, "radius", radius, "unit", unit)
-	events, err := s.fetchArtistEvents(ctx, apiKey, artist, postal, radius, unit)
+	slog.Debug("concerts: fetching artist events", "artist", artist, "geo", geo, "radius", radius, "unit", unit)
+	events, err := s.fetchArtistEvents(ctx, apiKey, artist, geo, radius, unit)
 	if err != nil {
 		return nil, err
 	}
@@ -216,12 +283,12 @@ func (s *Service) artistEvents(ctx context.Context, apiKey, artist, postal, radi
 	return events, nil
 }
 
-func (s *Service) fetchArtistEvents(ctx context.Context, apiKey, artist, postal, radius, unit string) ([]tmEvent, error) {
+func (s *Service) fetchArtistEvents(ctx context.Context, apiKey, artist, geo, radius, unit string) ([]tmEvent, error) {
 	var all []tmEvent
 	for page := 0; page < maxPages; page++ {
-		u := fmt.Sprintf("%s/events.json?apikey=%s&classificationName=music&keyword=%s&postalCode=%s&radius=%s&unit=%s&size=200&sort=date,asc&startDateTime=%s&page=%d",
+		u := fmt.Sprintf("%s/events.json?apikey=%s&classificationName=music&keyword=%s&%s&radius=%s&unit=%s&size=200&sort=date,asc&startDateTime=%s&page=%d",
 			s.baseURL,
-			url.QueryEscape(apiKey), url.QueryEscape(artist), url.QueryEscape(postal), url.QueryEscape(radius), unit,
+			url.QueryEscape(apiKey), url.QueryEscape(artist), geo, url.QueryEscape(radius), unit,
 			time.Now().UTC().Format("2006-01-02T15:04:05Z"), page)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

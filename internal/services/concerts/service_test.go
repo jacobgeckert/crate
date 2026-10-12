@@ -34,11 +34,17 @@ func newTestService(t *testing.T, handler http.HandlerFunc) (*Service, *db.Queri
 		fake = httptest.NewServer(handler)
 		t.Cleanup(fake.Close)
 	}
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"places":[{"latitude":"40.5","longitude":"-88.9"}]}`))
+	}))
+	t.Cleanup(geo.Close)
 
 	s := NewService(queries, c)
 	if fake != nil {
 		s.baseURL = fake.URL
 	}
+	s.geoURL = geo.URL
 	return s, queries
 }
 
@@ -139,7 +145,7 @@ func TestShowsMatchesWatchedArtists(t *testing.T) {
 	if shows[1].ArtistName != "Offspring" {
 		t.Errorf("expected Offspring match, got %+v", shows[1])
 	}
-	if gotQuery == "" || !containsAll(gotQuery, "apikey=test-key", "postalCode=90210", "radius=25", "unit=miles", "classificationName=music", "keyword=") {
+	if gotQuery == "" || !containsAll(gotQuery, "apikey=test-key", "latlong=40.5%2C-88.9", "radius=25", "unit=miles", "classificationName=music", "keyword=") {
 		t.Errorf("unexpected query: %s", gotQuery)
 	}
 }
