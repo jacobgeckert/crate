@@ -1088,7 +1088,15 @@ func (s *Server) handleUnignoreAlbum(w http.ResponseWriter, r *http.Request) {
 	s.queries.UpdateTrackStatusByAlbum(id, models.TrackStatusIgnored, models.TrackStatusWanted)
 	// Un-ignoring means "I want this" — download now rather than waiting for
 	// the scheduler's next wanted-tracks sweep. Album-first search, per-track
-	// fallback for whatever a single source can't cover.
+	// fallback for whatever a single source can't cover. An album whose
+	// release date hasn't passed stays queued as wanted instead — the sweep
+	// picks it up on release day; an early single is no reason to grab files
+	// weeks before the album drops.
+	if album, aerr := s.queries.GetAlbum(id); aerr == nil && album.ReleaseDate != nil && *album.ReleaseDate > time.Now().Format("2006-01-02") {
+		slog.Info("unignore: upcoming album, search deferred to release date", "album", album.Title, "release_date", *album.ReleaseDate)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "watched"})
+		return
+	}
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
@@ -1289,16 +1297,16 @@ func (s *Server) handleUnwatchTrack(w http.ResponseWriter, r *http.Request) {
 // trusted input (only the app writes it), but an extension allowlist keeps the
 // endpoint from ever doubling as a generic file server.
 var streamableExts = map[string]string{
-	".mp3": "audio/mpeg",
+	".mp3":  "audio/mpeg",
 	".flac": "audio/flac",
-	".wav": "audio/wav",
-	".ogg": "audio/ogg",
-	".oga": "audio/ogg",
+	".wav":  "audio/wav",
+	".ogg":  "audio/ogg",
+	".oga":  "audio/ogg",
 	".opus": "audio/opus",
-	".m4a": "audio/mp4",
-	".aac": "audio/aac",
-	".wv": "audio/wavpack",
-	".aif": "audio/aiff",
+	".m4a":  "audio/mp4",
+	".aac":  "audio/aac",
+	".wv":   "audio/wavpack",
+	".aif":  "audio/aiff",
 	".aiff": "audio/aiff",
 }
 

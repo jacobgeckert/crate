@@ -288,8 +288,15 @@ func startFakeProvider(t *testing.T) string {
 // files whose names don't match the track title).
 type fakeSlskdServer struct {
 	*httptest.Server
-	mu   sync.Mutex
-	resp slskd.SearchResponse
+	mu       sync.Mutex
+	resp     slskd.SearchResponse
+	searches int
+}
+
+func (f *fakeSlskdServer) searchCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searches
 }
 
 func (f *fakeSlskdServer) setSearchResponse(resp slskd.SearchResponse) {
@@ -343,6 +350,9 @@ func newFakeSlskd() *fakeSlskdServer {
 		json.NewEncoder(w).Encode(f.searchResponse())
 	})
 	mux.HandleFunc("/api/v0/searches", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.searches++
+		f.mu.Unlock()
 		json.NewEncoder(w).Encode(f.searchResponse())
 	})
 	f.Server = httptest.NewServer(mux)
@@ -1302,6 +1312,44 @@ func TestRefreshRenamesStaleArtist(t *testing.T) {
 	got, _ := env.queries.GetArtist(artists[0].ID)
 	if got == nil || got.Name != "Test Artist" {
 		t.Errorf("stale name survived refresh: %+v", got)
+	}
+}
+
+// Un-ignoring an album whose release date hasn't passed marks its tracks
+// wanted but must not search yet — an already-out single would otherwise
+// download weeks before the album drops. The sweep picks it up on release day.
+func TestUnignoreUpcomingAlbumDefersSearch(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	future := "2999-01-01"
+	upcoming := models.Album{
+		ArtistID: artists[0].ID, Title: "Future Album", Provider: "test",
+		ProviderID: "rel-future", ReleaseDate: &future, Status: models.AlbumStatusIgnored,
+	}
+	if err := env.queries.CreateAlbum(&upcoming); err != nil {
+		t.Fatal(err)
+	}
+	tr := models.Track{
+		AlbumID: upcoming.ID, Title: "Future Track", TrackNumber: 1,
+		Provider: "test", ProviderID: "9000", Status: models.TrackStatusIgnored,
+	}
+	if err := env.queries.CreateTrack(&tr); err != nil {
+		t.Fatal(err)
+	}
+
+	before := env.fakeSlskd.searchCount()
+	w := env.do("DELETE", fmt.Sprintf("/api/albums/%d/ignore", upcoming.ID), "")
+	if w.Code != 200 {
+		t.Fatalf("unignore: expected 200, got %d", w.Code)
+	}
+	if got := env.fakeSlskd.searchCount(); got != before {
+		t.Errorf("upcoming album triggered %d slskd searches", got-before)
+	}
+	got, _ := env.queries.GetTrack(tr.ID)
+	if got == nil || got.Status != models.TrackStatusWanted {
+		t.Errorf("track should be wanted after unignore, got %+v", got)
 	}
 }
 
