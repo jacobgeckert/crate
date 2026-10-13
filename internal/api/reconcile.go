@@ -218,6 +218,13 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 	for _, pt := range detail.Tracks {
 		if canon := byID[pt.Id]; canon != nil {
 			used[canon.ID] = true
+			// The release's listing is authoritative — a row carried over
+			// from another edition keeps its old numbering unless relisted.
+			if canon.Title != pt.Title || canon.TrackNumber != int(pt.TrackNumber) || canon.DiscNumber != int(pt.DiscNumber) {
+				if err := s.queries.UpdateTrackListing(canon.ID, pt.Title, int(pt.TrackNumber), int(pt.DiscNumber)); err != nil {
+					slog.Error("sync: relist track", "album", title, "track", pt.Title, "error", err)
+				}
+			}
 			if recID := pt.Metadata["recording_id"]; recID != "" {
 				// Stamp the recording id if the row predates us storing it.
 				_ = s.queries.SetTrackMBRecordingID(canon.ID, recID)
@@ -245,6 +252,7 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 				} else {
 					used[match.ID] = true
 					matched++
+					s.relistTrack(albumID, title, match.ID, pt)
 				}
 				continue
 			}
@@ -255,6 +263,7 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 			} else {
 				used[match.ID] = true
 				matched++
+				s.relistTrack(albumID, title, match.ID, pt)
 			}
 			continue
 		}
@@ -330,6 +339,15 @@ func (s *Server) foldAlbumTracks(providerName string, albumID int64, title strin
 		slog.Info("sync: release synced", "album", title, "provider", providerName, "tracks_added", added, "local_matched", matched, "dupes_merged", merged, "stale_pruned", pruned, "files_reverted", reverted)
 	}
 	return
+}
+
+// relistTrack adopts the release's title/numbering on a matched row — same
+// as the split path — so a track relinked from another edition displays (and
+// names future files) by the release it now lives on.
+func (s *Server) relistTrack(albumID int64, title string, trackID int64, pt *pb.TrackInfo) {
+	if err := s.queries.UpdateTrackListing(trackID, pt.Title, int(pt.TrackNumber), int(pt.DiscNumber)); err != nil {
+		slog.Error("sync: relist track", "album", title, "track", pt.Title, "error", err)
+	}
 }
 
 // verifyAlbumFiles reverts owned rows whose file vanished from disk back to

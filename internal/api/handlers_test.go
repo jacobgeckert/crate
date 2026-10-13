@@ -1242,6 +1242,47 @@ func TestRefreshPrunesStrayTracks(t *testing.T) {
 	}
 }
 
+// A row relinked from another edition keeps its provider anchor but must
+// adopt this release's title/track/disc numbers — otherwise an album that
+// switched editions renders the old edition's numbering.
+func TestRefreshRelistsStaleNumbering(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	album := albumByTitle(t, albums, "Album One")
+
+	// Track A1 as it would exist after folding a different edition: same
+	// release-track id, but the old edition's numbering and a stale title.
+	tracks, _ := env.queries.ListTracksByAlbum(album.ID)
+	var target *models.Track
+	for i := range tracks {
+		if tracks[i].ProviderID == "3000" {
+			target = &tracks[i]
+		}
+	}
+	if target == nil {
+		t.Fatal("fixture track 3000 not found")
+	}
+	if err := env.queries.UpdateTrackListing(target.ID, "Track A1 (remaster)", 7, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/refresh", album.ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+
+	got, err := env.queries.GetTrack(target.ID)
+	if err != nil || got == nil {
+		t.Fatalf("relisted row missing: %v", err)
+	}
+	if got.Title != "Track A1" || got.TrackNumber != 1 || got.DiscNumber != 1 {
+		t.Errorf("stale listing survived refresh: title=%q track=%d disc=%d", got.Title, got.TrackNumber, got.DiscNumber)
+	}
+}
+
 // Artist refresh lands in the activity log: a completed sync records
 // discography_sync, a provider-side failure records sync_failed instead of
 // vanishing silently.

@@ -385,6 +385,11 @@ export default function AlbumDetail() {
     return album.tracks.filter((t) => t.title.toLowerCase().includes(q));
   }, [album, trackFilter]);
 
+  const multiDisc = useMemo(
+    () => new Set((album?.tracks ?? []).map((t) => t.disc_number)).size > 1,
+    [album],
+  );
+
   const splitTargets = useMemo(
     () => editions?.editions.filter((e) => e.id !== album?.release_id) ?? [],
     [editions, album],
@@ -664,14 +669,20 @@ export default function AlbumDetail() {
             <p className="text-zinc-500 text-sm text-center py-4">No matching tracks</p>
           )}
           <div className="rounded-lg overflow-hidden">
-            {filteredTracks.map((track) => {
+            {filteredTracks.map((track, idx) => {
               const isQueued = activeTrackIds.has(track.id);
               const isSearching = queueTrack.isPending && queueTrack.variables === track.id;
               const isManualOpen = manualSearchTrackId === track.id;
               const isLocalUnmatched = track.provider === 'local' && album.provider !== 'local';
               const isLinkOpen = linkTrackId === track.id;
+              const showDiscHeader = multiDisc && (idx === 0 || filteredTracks[idx - 1].disc_number !== track.disc_number);
               return (
                 <div key={track.id}>
+                  {showDiscHeader && (
+                    <p className="px-2.5 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                      Disc {track.disc_number}
+                    </p>
+                  )}
                   <div
                     className={`flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer active:bg-zinc-800/50 transition-colors ${
                       splitMode && splitSel.has(track.id) ? 'bg-blue-900/20' : ''
