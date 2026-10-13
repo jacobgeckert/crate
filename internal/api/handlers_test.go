@@ -1283,6 +1283,28 @@ func TestRefreshRelistsStaleNumbering(t *testing.T) {
 	}
 }
 
+// An artist added under a former name or alias adopts the provider's
+// canonical name on sync — the row isn't stuck displaying a defunct name.
+func TestRefreshRenamesStaleArtist(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	if err := env.queries.UpdateArtistName(artists[0].ID, "Test Artist (defunct name)"); err != nil {
+		t.Fatal(err)
+	}
+
+	w := env.do("POST", fmt.Sprintf("/api/artists/%d/refresh", artists[0].ID), "")
+	if w.Code != 202 {
+		t.Fatalf("refresh: expected 202, got %d", w.Code)
+	}
+
+	got, _ := env.queries.GetArtist(artists[0].ID)
+	if got == nil || got.Name != "Test Artist" {
+		t.Errorf("stale name survived refresh: %+v", got)
+	}
+}
+
 // Artist refresh lands in the activity log: a completed sync records
 // discography_sync, a provider-side failure records sync_failed instead of
 // vanishing silently.

@@ -65,6 +65,21 @@ func (s *Server) reconcileLocalArtist(providerName string, artistID int64, artis
 	}
 	slog.Info("sync: provider returned releases", "artist", name, "provider", providerName, "releases", len(albumList.Albums))
 
+	// The provider's canonical name is authoritative — an artist added under
+	// an alias or former name (e.g. imported with old tags, then relinked)
+	// adopts the rename here instead of displaying it forever.
+	if artist != nil {
+		if detail, derr := s.providers.GetArtist(ctx, providerName, artistProviderID); derr == nil && detail.Name != "" && detail.Name != artist.Name {
+			if uerr := s.queries.UpdateArtistName(artistID, detail.Name); uerr != nil {
+				slog.Error("sync: rename artist", "artist", name, "new", detail.Name, "error", uerr)
+			} else {
+				slog.Info("sync: artist renamed", "from", name, "to", detail.Name, "provider", providerName)
+				artist.Name = detail.Name
+				name = detail.Name
+			}
+		}
+	}
+
 	s.enrichArtistImage(ctx, artistID)
 
 	existing, err := s.queries.ListAlbumsByArtist(artistID)

@@ -124,6 +124,11 @@ func (q *Queries) UpdateArtistStatus(id int64, status models.ArtistStatus) error
 	return err
 }
 
+func (q *Queries) UpdateArtistName(id int64, name string) error {
+	_, err := q.db.Exec(`UPDATE artists SET name = ?, updated_at = ? WHERE id = ?`, name, now(), id)
+	return err
+}
+
 func (q *Queries) SetAlbumCoverURL(id int64, url string) error {
 	_, err := q.db.Exec(`UPDATE albums SET cover_url = ?, updated_at = ? WHERE id = ?`, url, now(), id)
 	return err
@@ -817,7 +822,7 @@ func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, erro
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
-		 WHERE t.status = 'wanted' AND al.artist_id = ?` + wantedReleaseClause + wantedSingleClause + `
+		 WHERE t.status = 'wanted' AND al.artist_id = ?`+wantedReleaseClause+wantedSingleClause+`
 		 ORDER BY al.year, t.disc_number, t.track_number`, artistID,
 	)
 	if err != nil {
