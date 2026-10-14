@@ -94,6 +94,50 @@ const tmFeed = `{
   "page": {"number": 0, "totalPages": 1}
 }`
 
+const tmCoBilledFeed = `{
+  "_embedded": {
+    "events": [
+      {
+        "id": "ev9", "name": "Co-Headline Tour", "url": "https://tm.example/ev9",
+        "dates": {"start": {"localDate": "2026-11-01"}},
+        "_embedded": {
+          "venues": [{"name": "Arena", "city": {"name": "Chicago"}, "state": {"stateCode": "IL"}}],
+          "attractions": [{"id": "a1", "name": "Headliner"}, {"id": "a2", "name": "Support Act"}]
+        }
+      }
+    ]
+  },
+  "page": {"number": 0, "totalPages": 1}
+}`
+
+// Two watched artists billed on the same event collapse into one listing —
+// each artist's feed matches the shared event, but the user sees a single
+// row naming both.
+func TestShowsMergesCoBilledArtists(t *testing.T) {
+	s, queries := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(tmCoBilledFeed))
+	})
+	configure(t, queries)
+
+	for _, name := range []string{"Headliner", "Support Act"} {
+		if err := queries.CreateArtist(&models.Artist{Name: name, Provider: "test", ProviderID: name, Status: models.ArtistStatusWatched}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	shows, err := s.Shows(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shows) != 1 {
+		t.Fatalf("expected 1 merged show, got %d: %+v", len(shows), shows)
+	}
+	if len(shows[0].Artists) != 2 || shows[0].Artists[0].Name != "Headliner" || shows[0].Artists[1].Name != "Support Act" {
+		t.Errorf("merged artists wrong: %+v", shows[0].Artists)
+	}
+}
+
 func TestShowsNotConfigured(t *testing.T) {
 	s, _ := newTestService(t, nil)
 	_, err := s.Shows(context.Background(), false)
@@ -129,7 +173,7 @@ func TestShowsMatchesWatchedArtists(t *testing.T) {
 	}
 
 	// "blink-182" normalizes to "blink 182" — same as the attraction "blink-182".
-	if *shows[0].ArtistID == 0 || shows[0].ArtistName != "blink-182" {
+	if len(shows[0].Artists) != 1 || shows[0].Artists[0].Name != "blink-182" || shows[0].Artists[0].ID == 0 {
 		t.Errorf("unexpected first show: %+v", shows[0])
 	}
 	if shows[0].Venue != "The Forum" || shows[0].City != "Inglewood" || shows[0].State != "CA" {
@@ -142,7 +186,7 @@ func TestShowsMatchesWatchedArtists(t *testing.T) {
 		t.Errorf("image not picked: %+v", shows[0])
 	}
 	// "The Offspring" normalizes to "offspring" — matches attraction "Offspring".
-	if shows[1].ArtistName != "Offspring" {
+	if len(shows[1].Artists) != 1 || shows[1].Artists[0].Name != "Offspring" {
 		t.Errorf("expected Offspring match, got %+v", shows[1])
 	}
 	if gotQuery == "" || !containsAll(gotQuery, "apikey=test-key", "latlong=40.5%2C-88.9", "radius=25", "unit=miles", "classificationName=music", "keyword=") {

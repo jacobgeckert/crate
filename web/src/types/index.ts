@@ -347,11 +347,15 @@ export interface ArtistSyncStatus {
   current?: string;
 }
 
+export interface ShowArtist {
+  id: number;
+  name: string;
+}
+
 export interface Show {
   event_id: string;
   event_name: string;
-  artist_id?: number;
-  artist_name: string;
+  artists: ShowArtist[];
   date: string;
   time?: string;
   venue: string;

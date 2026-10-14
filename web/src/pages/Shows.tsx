@@ -119,7 +119,7 @@ export default function Shows() {
           </p>
           <div className="space-y-1">
             {group.shows.map((show) => (
-              <div key={`${show.event_id}-${show.artist_id}`} className="flex items-center gap-2.5 bg-zinc-800/40 rounded-lg p-2">
+              <div key={show.event_id} className="flex items-center gap-2.5 bg-zinc-800/40 rounded-lg p-2">
                 <div className="w-10 h-10 rounded bg-zinc-700 overflow-hidden shrink-0">
                   {show.image ? (
                     <img src={show.image} alt="" className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
@@ -130,17 +130,18 @@ export default function Shows() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  {show.artist_id ? (
-                    <Link to={`/artist/${show.artist_id}`} className="font-medium text-sm truncate block hover:underline">
-                      {show.artist_name}
-                    </Link>
-                  ) : (
-                    <p className="font-medium text-sm truncate">{show.artist_name}</p>
-                  )}
+                  <p className="font-medium text-sm truncate">
+                    {show.artists.map((a, i) => (
+                      <span key={a.id}>
+                        {i > 0 && <span className="text-zinc-500"> + </span>}
+                        <Link to={`/artist/${a.id}`} className="hover:underline">{a.name}</Link>
+                      </span>
+                    ))}
+                  </p>
                   <p className="text-[11px] text-zinc-500 truncate">
                     {show.venue}{show.city ? ` · ${show.city}` : ''}{show.state ? `, ${show.state}` : ''}
                   </p>
-                  {show.event_name !== show.artist_name && (
+                  {!(show.artists.length === 1 && show.event_name === show.artists[0].name) && (
                     <p className="text-[10px] text-zinc-600 truncate">{show.event_name}</p>
                   )}
                 </div>

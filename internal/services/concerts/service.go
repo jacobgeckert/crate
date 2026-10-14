@@ -36,25 +36,31 @@ const (
 	defaultGeoURL  = "https://api.zippopotam.us" // postal→latlong, no key needed
 	defaultRadius  = "50"
 	cacheTTL       = 12 * time.Hour
-	geoTTL         = 30 * 24 * time.Hour // postal codes don't move
+	geoTTL         = 30 * 24 * time.Hour    // postal codes don't move
 	maxPages       = 2                      // per artist — own-shows feeds are tiny
 	requestPace    = 210 * time.Millisecond // TM free tier allows ~5 req/s
 )
 
 var ErrNotConfigured = errors.New("concerts not configured: set ticketmaster_api_key and concerts_postal_code in settings")
 
+// ShowArtist is one watched artist billed on a show — several can share an
+// event (headliner + support), so a Show carries the whole list.
+type ShowArtist struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"` // attraction name as billed
+}
+
 type Show struct {
-	EventID    string `json:"event_id"`
-	EventName  string `json:"event_name"`
-	ArtistID   *int64 `json:"artist_id,omitempty"`
-	ArtistName string `json:"artist_name"` // attraction name as billed
-	Date       string `json:"date"`        // YYYY-MM-DD local to the venue
-	Time       string `json:"time,omitempty"`
-	Venue      string `json:"venue"`
-	City       string `json:"city"`
-	State      string `json:"state,omitempty"`
-	URL        string `json:"url"`
-	Image      string `json:"image,omitempty"`
+	EventID   string       `json:"event_id"`
+	EventName string       `json:"event_name"`
+	Artists   []ShowArtist `json:"artists"` // watched artists on the bill
+	Date      string       `json:"date"`    // YYYY-MM-DD local to the venue
+	Time      string       `json:"time,omitempty"`
+	Venue     string       `json:"venue"`
+	City      string       `json:"city"`
+	State     string       `json:"state,omitempty"`
+	URL       string       `json:"url"`
+	Image     string       `json:"image,omitempty"`
 }
 
 type Service struct {
@@ -150,7 +156,8 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 		close(results)
 	}()
 
-	var shows []Show
+	var shows []*Show
+	byEvent := make(map[string]*Show)
 	seen := make(map[string]bool)
 	var failCount int
 	for res := range results {
@@ -177,7 +184,15 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 					continue
 				}
 				seen[key] = true
-				shows = append(shows, toShow(ev, attr.Name, res.artist.ID))
+				// Same event, another watched artist on the bill — fold into
+				// one listing instead of a row per artist.
+				sh, ok := byEvent[ev.ID]
+				if !ok {
+					sh = toShow(ev)
+					byEvent[ev.ID] = sh
+					shows = append(shows, sh)
+				}
+				sh.Artists = append(sh.Artists, ShowArtist{ID: res.artist.ID, Name: attr.Name})
 			}
 		}
 		slog.Debug("concerts: artist feed", "artist", res.artist.Name,
@@ -187,9 +202,14 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 	if len(artists) > 0 && failCount == len(artists) {
 		return nil, fmt.Errorf("ticketmaster unreachable: every artist query failed")
 	}
-	sort.Slice(shows, func(i, j int) bool { return shows[i].Date < shows[j].Date })
-	slog.Info("concerts: matched shows", "artists", len(artists), "failures", failCount, "shows", len(shows))
-	return shows, nil
+	out := make([]Show, 0, len(shows))
+	for _, sh := range shows {
+		sort.Slice(sh.Artists, func(i, j int) bool { return sh.Artists[i].Name < sh.Artists[j].Name })
+		out = append(out, *sh)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
+	slog.Info("concerts: matched shows", "artists", len(artists), "failures", failCount, "shows", len(out))
+	return out, nil
 }
 
 // geoParam resolves the configured postal code into Ticketmaster's latlong
@@ -321,16 +341,14 @@ func (s *Service) fetchArtistEvents(ctx context.Context, apiKey, artist, geo, ra
 	return all, nil
 }
 
-func toShow(ev tmEvent, artistName string, artistID int64) Show {
-	show := Show{
-		EventID:    ev.ID,
-		EventName:  ev.Name,
-		ArtistID:   &artistID,
-		ArtistName: artistName,
-		Date:       ev.Dates.Start.LocalDate,
-		Time:       ev.Dates.Start.LocalTime,
-		URL:        ev.URL,
-		Image:      pickImage(ev.Images),
+func toShow(ev tmEvent) *Show {
+	show := &Show{
+		EventID:   ev.ID,
+		EventName: ev.Name,
+		Date:      ev.Dates.Start.LocalDate,
+		Time:      ev.Dates.Start.LocalTime,
+		URL:       ev.URL,
+		Image:     pickImage(ev.Images),
 	}
 	if len(ev.Embedded.Venues) > 0 {
 		v := ev.Embedded.Venues[0]
@@ -398,8 +416,8 @@ type tmEvent struct {
 	Images   []tmImage `json:"images"`
 	Embedded struct {
 		Venues []struct {
-			Name  string `json:"name"`
-			City  struct {
+			Name string `json:"name"`
+			City struct {
 				Name string `json:"name"`
 			} `json:"city"`
 			State struct {
