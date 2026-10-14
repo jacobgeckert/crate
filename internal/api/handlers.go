@@ -271,12 +271,13 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 		}
 
 		albums := albumList.Albums
+		watch := s.newReleaseWatchFor(existing).forCatalog()
 		s.bgWork.Add(1)
 		go func() {
 			defer s.bgWork.Done()
 			// Detached from the request: this work must outlive the response.
 			s.enrichArtistImage(context.WithoutCancel(r.Context()), existing.ID)
-			s.saveAlbumsFromProvider(primary, existing.ID, albums)
+			s.saveAlbumsFromProvider(primary, existing.ID, albums, watch)
 		}()
 
 		writeJSON(w, http.StatusOK, existing)
@@ -302,26 +303,24 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	albums := albumList.Albums
+	watch := s.newReleaseWatchFor(artist).forCatalog()
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
 		// Detached from the request: this work must outlive the response.
 		s.enrichArtistImage(context.WithoutCancel(r.Context()), artist.ID)
-		s.saveAlbumsFromProvider(primary, artist.ID, albums)
+		s.saveAlbumsFromProvider(primary, artist.ID, albums, watch)
 	}()
 
 	writeJSON(w, http.StatusCreated, artist)
 }
 
-func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, albums []*pb.AlbumSummary) {
+func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, albums []*pb.AlbumSummary, watch *newReleaseWatch) {
 	ctx := context.Background()
 	name := fmt.Sprintf("artist %d", artistID)
-	var artist *models.Artist
 	if a, err := s.queries.GetArtist(artistID); err == nil && a != nil {
-		artist = a
 		name = a.Name
 	}
-	watch := s.newReleaseWatchFor(artist)
 	slog.Info("sync: saving watched discography", "artist", name, "provider", providerName, "releases", len(albums))
 	added, ignored := 0, 0
 	for _, pa := range albums {

@@ -147,7 +147,7 @@ export default function BrowseArtist() {
             : 'bg-white text-zinc-900 active:scale-[0.98]'
         }`}
       >
-        {watchArtist.isPending ? 'Adding...' : artist.artist_watched || watchArtist.isSuccess ? '✓ Watching All' : 'Watch All Albums'}
+        {watchArtist.isPending ? 'Adding...' : artist.artist_watched || watchArtist.isSuccess ? '✓ Watching' : 'Watch Artist'}
       </button>
 
       {artist.albums && artist.albums.length > 0 && (

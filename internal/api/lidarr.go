@@ -416,11 +416,17 @@ func (s *Server) lidarrAddArtist(w http.ResponseWriter, r *http.Request) {
 	albums := lidarrFilterAlbumsByMonitor(albumList.Albums, monitor)
 	slog.Info("[LIDARR SHIM] monitoring strategy", "monitor", monitor, "total_albums", len(albumList.Albums), "saving", len(albums), "searchOnAdd", searchOnAdd)
 
+	// "all"/"latest" monitor the releases already saved (catalog semantics);
+	// other strategies keep the new-release gate — future releases only.
+	watch := s.newReleaseWatchFor(artist)
+	if monitor == "all" || monitor == "latest" {
+		watch = &newReleaseWatch{watching: true, allTypes: true}
+	}
 	artistID := artist.ID
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
-		s.saveAlbumsFromProvider(primary, artistID, albums)
+		s.saveAlbumsFromProvider(primary, artistID, albums, watch)
 		if searchOnAdd {
 			s.lidarrQueueArtistDownloads(artistID)
 		}

@@ -689,6 +689,7 @@ type newReleaseWatch struct {
 	watching bool
 	since    time.Time
 	types    map[string]bool
+	allTypes bool // every record type qualifies (Lidarr "monitor all")
 }
 
 func (s *Server) newReleaseWatchFor(artist *models.Artist) *newReleaseWatch {
@@ -704,6 +705,13 @@ func (s *Server) newReleaseWatchFor(artist *models.Artist) *newReleaseWatch {
 	return w
 }
 
+// forCatalog returns the gate for an explicit "watch artist" action: enabled
+// types qualify across the whole back catalog — the since-date gate only
+// applies to future new-release detection.
+func (w *newReleaseWatch) forCatalog() *newReleaseWatch {
+	return &newReleaseWatch{watching: true, types: w.types}
+}
+
 // qualifies mirrors the scheduler's gate: watched type, released on/after the
 // watch start. A missing release date doesn't disqualify (can't prove it's
 // old), matching detectNewReleases. Secondary-type releases ride the same
@@ -713,7 +721,7 @@ func (w *newReleaseWatch) qualifies(pa *pb.AlbumSummary) bool {
 	if !w.watching {
 		return false
 	}
-	if t := pa.RecordType; t != "" && !w.types[t] {
+	if t := pa.RecordType; t != "" && !w.allTypes && !w.types[t] {
 		return false
 	}
 	if d := pa.Metadata["release_date"]; d != "" {

@@ -600,16 +600,41 @@ func TestWatchArtistCreatesFullDiscography(t *testing.T) {
 		t.Errorf("expected 3 total tracks, got %d", total)
 	}
 
-	// Synced-but-not-owned albums default to ignored — the user un-ignores the
-	// releases they actually want.
+	// Watching an artist wants the enabled release types — both fixture
+	// albums are record_type "album", enabled by default.
 	for _, a := range albums {
-		if a.Status != models.AlbumStatusIgnored {
-			t.Errorf("album %q has status %q, expected 'ignored'", a.Title, a.Status)
+		if a.Status != models.AlbumStatusWatched {
+			t.Errorf("album %q has status %q, expected 'watched'", a.Title, a.Status)
 		}
 	}
 	for _, t2 := range append(tracks1, tracks2...) {
-		if t2.Status != models.TrackStatusIgnored {
-			t.Errorf("track %q has status %q, expected 'ignored'", t2.Title, t2.Status)
+		if t2.Status != models.TrackStatusWanted {
+			t.Errorf("track %q has status %q, expected 'wanted'", t2.Title, t2.Status)
+		}
+	}
+}
+
+// Disabled record types land ignored — watching an artist only wants the
+// user's preferred release types.
+func TestWatchArtistRespectsReleaseTypes(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.queries.SetSetting("new_release_types", `{"album":false,"ep":true,"single":true,"compilation":true}`); err != nil {
+		t.Fatal(err)
+	}
+
+	w := env.do("POST", "/api/watch/artist/1000", `{}`)
+	if w.Code != 201 {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(albums) != 2 {
+		t.Fatalf("expected 2 albums, got %d", len(albums))
+	}
+	for _, a := range albums {
+		if a.Status != models.AlbumStatusIgnored {
+			t.Errorf("album %q has status %q, expected 'ignored'", a.Title, a.Status)
 		}
 	}
 }
@@ -924,6 +949,9 @@ func TestSetAlbumEditionReFoldsTracks(t *testing.T) {
 	if two == nil {
 		t.Fatal("Album Two not found")
 	}
+	// The scenario exercises an ignored album — watch now lands enabled
+	// types wanted, so ignore it explicitly.
+	env.do("PUT", fmt.Sprintf("/api/albums/%d/ignore", two.ID), "")
 
 	// Editions endpoint lists the release-group's editions.
 	w := env.do("GET", fmt.Sprintf("/api/albums/%d/editions", two.ID), "")
@@ -1007,6 +1035,9 @@ func TestSplitTracks(t *testing.T) {
 	if two == nil {
 		t.Fatal("Album Two not found")
 	}
+	// The scenario exercises an ignored album — watch now lands enabled
+	// types wanted, so ignore it explicitly.
+	env.do("PUT", fmt.Sprintf("/api/albums/%d/ignore", two.ID), "")
 
 	// The instrumental edition's files got folded into the standard album —
 	// owned rows keyed by the instrumental release's track ids.
