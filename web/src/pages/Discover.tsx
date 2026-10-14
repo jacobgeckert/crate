@@ -112,7 +112,9 @@ function SuggestionRow({ suggestion: s }: { suggestion: Suggestion }) {
             className={`text-[11px] text-zinc-500 mt-0.5 cursor-pointer ${expanded ? '' : 'line-clamp-2'}`}
             title={expanded ? 'Show less' : s.artists.join(', ')}
           >
-            because you watch {s.artists.join(', ')}
+            Because you listen to {expanded || s.artists.length <= 3
+              ? s.artists.join(', ')
+              : `${s.artists.slice(0, 3).join(', ')} +${s.artists.length - 3}`}
           </p>
         </div>
         <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
