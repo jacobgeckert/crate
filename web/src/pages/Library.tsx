@@ -570,7 +570,11 @@ function groupByLetter(artists: Artist[]): { letter: string; artists: Artist[] }
   const groups: { letter: string; artists: Artist[] }[] = [];
   for (const artist of sorted) {
     const first = artist.name[0]?.toUpperCase() ?? '#';
-    const letter = /[A-Z]/.test(first) ? first : '#';
+    // Latin letters get their own section. Non-Latin letters (e.g. 花冷え。)
+    // get a section per leading character rather than sharing '#' — that
+    // bucket is reserved for digits and symbols, and a second '#' section
+    // was unreachable from the rail.
+    const letter = /[A-Z]/.test(first) ? first : /\p{L}/u.test(first) ? first : '#';
     const last = groups[groups.length - 1];
     if (last?.letter === letter) {
       last.artists.push(artist);

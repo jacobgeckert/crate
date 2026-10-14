@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
-const LETTERS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const BASE_LETTERS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const BASE_SET = new Set(BASE_LETTERS);
 
 interface AlphabetRailProps {
   activeLetters: Set<string>;
@@ -10,6 +11,13 @@ export default function AlphabetRail({ activeLetters }: AlphabetRailProps) {
   const railRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [hoveredLetter, setHoveredLetter] = useState<string | null>(null);
+
+  // Non-Latin leading letters (e.g. 花) become their own sections after Z —
+  // append them so the rail can reach them.
+  const letters = useMemo(
+    () => [...BASE_LETTERS, ...[...activeLetters].filter((l) => !BASE_SET.has(l))],
+    [activeLetters],
+  );
 
   const scrollToLetter = useCallback((letter: string) => {
     const el = document.getElementById(`section-${letter}`);
@@ -32,9 +40,9 @@ export default function AlphabetRail({ activeLetters }: AlphabetRailProps) {
     if (!railRef.current) return null;
     const rect = railRef.current.getBoundingClientRect();
     const y = clientY - rect.top;
-    const idx = Math.floor((y / rect.height) * LETTERS.length);
-    return LETTERS[Math.max(0, Math.min(idx, LETTERS.length - 1))];
-  }, []);
+    const idx = Math.floor((y / rect.height) * letters.length);
+    return letters[Math.max(0, Math.min(idx, letters.length - 1))];
+  }, [letters]);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     setDragging(true);
@@ -72,7 +80,7 @@ export default function AlphabetRail({ activeLetters }: AlphabetRailProps) {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        {LETTERS.map((letter) => {
+        {letters.map((letter) => {
           const isActive = activeLetters.has(letter);
           const isHovered = hoveredLetter === letter;
           return (
