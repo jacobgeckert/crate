@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
@@ -84,6 +85,7 @@ export default function Discover() {
 }
 
 function SuggestionCard({ suggestion: s }: { suggestion: Suggestion }) {
+  const [expanded, setExpanded] = useState(false);
   const to = s.mbid
     ? `/browse/artist/${s.mbid}?provider=musicbrainz`
     : `/search?q=${encodeURIComponent(s.name)}`;
@@ -102,8 +104,15 @@ function SuggestionCard({ suggestion: s }: { suggestion: Suggestion }) {
         </div>
         <div className="p-2">
           <p className="text-xs font-medium truncate" title={s.name}>{s.name}</p>
-          <p className="text-[10px] text-zinc-500 mt-0.5 truncate" title={s.artists.join(', ')}>
-            because you watch {s.artists.slice(0, 2).join(', ')}{s.artists.length > 2 ? ` +${s.artists.length - 2}` : ''}
+          <p
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); } }}
+            className={`text-[10px] text-zinc-500 mt-0.5 cursor-pointer ${expanded ? '' : 'line-clamp-2'}`}
+            title={expanded ? 'Show less' : s.artists.join(', ')}
+          >
+            because you watch {s.artists.join(', ')}
           </p>
         </div>
       </div>
