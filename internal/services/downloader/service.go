@@ -342,9 +342,12 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 	best := pickBestFile(search.Responses, track, s.queries, cfg)
 	if best == nil {
 		_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
-		errStr := "no suitable file found"
+		reason := missReason(search.Responses, track, s.queries, cfg)
+		slog.Info("downloader: search found no usable file", "track_id", track.ID,
+			"track", track.Title, "reason", reason)
 		s.logActivity("download_failed", "track", track.ID,
-			fmt.Sprintf("No results for: %s - %s", track.ArtistName, track.Title))
+			fmt.Sprintf("No results for: %s - %s (%s)", track.ArtistName, track.Title, reason))
+		errStr := "no suitable file found: " + reason
 		_ = s.queries.UpdateTrackStatus(track.ID, models.TrackStatusWanted)
 		return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errStr)
 	}
@@ -466,6 +469,8 @@ func (s *Service) DownloadAlbum(ctx context.Context, albumID int64) {
 	for _, tr := range wanted {
 		cand, ok := files[tr.ID]
 		if !ok {
+			slog.Info("downloader: album search uncovered track", "album", album.Title,
+				"track", tr.Title, "reason", missReason(search.Responses, tr, s.queries, cfg))
 			continue
 		}
 		dlID, err := s.queries.EnqueueDownloadReturningID(tr.ID)
@@ -1089,6 +1094,71 @@ type scoringConfig struct {
 // quality-tier gap (25) plus availability bonuses, but a two-tier drop still
 // falls back to the better file elsewhere.
 const sameUserBonus = 30
+
+// missReason explains why a track had no surviving candidate across a result
+// set — which guard dropped the matching files. Reports the most actionable
+// reason so album-search gaps and failed per-track searches are diagnosable.
+func missReason(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) string {
+	titleLower := strings.ToLower(track.Title)
+	artistLower := strings.ToLower(track.ArtistName)
+	sawArtistMiss, sawNegative, sawLocked, sawBlacklisted, sawFormat, sawTier := false, false, false, false, false, false
+	titleHits := 0
+	for _, res := range results {
+		for _, f := range res.Files {
+			nameLower := strings.ToLower(f.Filename)
+			if !strings.Contains(nameLower, titleLower) {
+				continue
+			}
+			titleHits++
+			if cfg.requireArtist && !strings.Contains(nameLower, artistLower) {
+				sawArtistMiss = true
+				continue
+			}
+			if cfg.excludeNegative && matchesNegativeKeyword(nameLower, cfg.negativeKeywords) {
+				sawNegative = true
+				continue
+			}
+			if f.IsLocked {
+				sawLocked = true
+				continue
+			}
+			if ac != nil && ac.IsBlacklisted(res.Username, f.Filename) {
+				sawBlacklisted = true
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(f.Filename))
+			if ext == "" {
+				ext = inferExt(nameLower)
+			}
+			if ext == "" || !supportedExts[ext] {
+				sawFormat = true
+				continue
+			}
+			if _, allowed := tierBasedScore(ext, f.BitRate, cfg); !allowed {
+				sawTier = true
+				continue
+			}
+		}
+	}
+	switch {
+	case titleHits == 0:
+		return "no result file contains the track title"
+	case sawBlacklisted:
+		return "matching file(s) are blacklisted"
+	case sawLocked:
+		return "matching file(s) are locked"
+	case sawNegative:
+		return "matching file(s) hit a negative keyword"
+	case sawTier:
+		return "matching file(s) fall outside configured quality tiers"
+	case sawFormat:
+		return "matching file(s) are unsupported formats"
+	case sawArtistMiss:
+		return "matching file(s) lack the artist name in their path"
+	default:
+		return "matched files but none selected"
+	}
+}
 
 func pickBestFile(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) *candidate {
 	cfg.requireArtist = true

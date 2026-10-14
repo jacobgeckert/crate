@@ -995,3 +995,50 @@ func TestPickAlbumSourceNoMatch(t *testing.T) {
 		t.Errorf("expected no source for an unmatched album, got %q/%v", user, files)
 	}
 }
+
+func TestMissReason(t *testing.T) {
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	cfg := defaultCfg
+	cfg.requireArtist = true
+
+	t.Run("no title match", func(t *testing.T) {
+		results := []slskd.SearchResult{{
+			Username: "u",
+			Files:    []slskd.SearchFile{{Filename: "music/Artist - Other.flac"}},
+		}}
+		if got := missReason(results, track, nil, cfg); got != "no result file contains the track title" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("blacklisted", func(t *testing.T) {
+		results := []slskd.SearchResult{{
+			Username: "u",
+			Files:    []slskd.SearchFile{{Filename: "music/Artist - Track.flac"}},
+		}}
+		bl := &fakeAvailability{blocked: map[string]bool{"u|music/Artist - Track.flac": true}}
+		if got := missReason(results, track, bl, cfg); got != "matching file(s) are blacklisted" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("locked", func(t *testing.T) {
+		results := []slskd.SearchResult{{
+			Username: "u",
+			Files:    []slskd.SearchFile{{Filename: "music/Artist - Track.flac", IsLocked: true}},
+		}}
+		if got := missReason(results, track, nil, cfg); got != "matching file(s) are locked" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("artist name missing from path", func(t *testing.T) {
+		results := []slskd.SearchResult{{
+			Username: "u",
+			Files:    []slskd.SearchFile{{Filename: "music/Random - Track.flac"}},
+		}}
+		if got := missReason(results, track, nil, cfg); got != "matching file(s) lack the artist name in their path" {
+			t.Errorf("got %q", got)
+		}
+	})
+}
