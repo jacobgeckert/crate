@@ -41,6 +41,12 @@ const settingsSections = [
     ],
   },
   {
+    title: 'Discovery (optional)',
+    fields: [
+      { key: 'lastfm_api_key', label: 'Last.fm API Key', placeholder: 'Your Last.fm API key', type: 'password', description: 'Free key from last.fm/api/account — enables the Discover page' },
+    ],
+  },
+  {
     title: 'Concerts (optional)',
     fields: [
       { key: 'ticketmaster_api_key', label: 'Ticketmaster API Key', placeholder: 'Discovery API consumer key', type: 'password', description: 'Free key from developer.ticketmaster.com — enables the Shows page' },

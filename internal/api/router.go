@@ -18,6 +18,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/concerts"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/discover"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/lyrics"
@@ -37,6 +38,7 @@ type Server struct {
 	uploads     *upload.Service
 	organizer   *organizer.Service
 	concerts    *concerts.Service
+	discover    *discover.Service
 	lyrics      *lyrics.Service
 	router      chi.Router
 	frontendFS  fs.FS
@@ -72,6 +74,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		uploads:     up,
 		organizer:   org,
 		concerts:    concerts.NewService(queries, c),
+		discover:    discover.NewService(queries, c),
 		lyrics:      lyr, // nil in tests — lyrics calls hit a live external API
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
@@ -153,6 +156,7 @@ func (s *Server) setupRouter() chi.Router {
 
 		r.Get("/releases/upcoming", s.handleUpcomingReleases)
 		r.Get("/concerts", s.handleGetConcerts)
+		r.Get("/discover", s.handleGetDiscover)
 
 		r.Route("/images", func(r chi.Router) {
 			r.Get("/{name}", s.handleServeImage)

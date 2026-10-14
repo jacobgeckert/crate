@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { formatFans } from '../lib/format';
 import type { ArtistSearchResult, ProviderInfo } from '../types/index';
@@ -8,8 +8,9 @@ import type { ArtistSearchResult, ProviderInfo } from '../types/index';
 const PAGE_SIZE = 25;
 
 export default function Search() {
-  const [query, setQuery] = useState('');
-  const [submitted, setSubmitted] = useState('');
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(searchParams.get('q') ?? '');
+  const [submitted, setSubmitted] = useState(searchParams.get('q') ?? '');
   const [provider, setProvider] = useState<string>('');
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [extraArtists, setExtraArtists] = useState<ArtistSearchResult[]>([]);

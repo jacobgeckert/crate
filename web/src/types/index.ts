@@ -373,6 +373,18 @@ export interface ConcertsResponse {
   shows: Show[];
 }
 
+export interface Suggestion {
+  name: string;
+  mbid?: string;
+  score: number;
+  artists: string[]; // watched artists it's similar to
+}
+
+export interface DiscoverResponse {
+  configured: boolean;
+  suggestions: Suggestion[];
+}
+
 // artistName is the name to display/query with — the user's override when set.
 export function artistName(a: { name: string; display_name?: string }): string {
   return a.display_name || a.name;

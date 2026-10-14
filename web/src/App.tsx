@@ -15,6 +15,7 @@ import Downloads from './pages/Downloads';
 import Activity from './pages/Activity';
 import Upcoming from './pages/Upcoming';
 import Shows from './pages/Shows';
+import Discover from './pages/Discover';
 import Upload from './pages/Upload';
 import Settings from './pages/Settings';
 import BlockedSources from './pages/BlockedSources';
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/activity" element={<Activity />} />
             <Route path="/upcoming" element={<Upcoming />} />
             <Route path="/shows" element={<Shows />} />
+            <Route path="/discover" element={<Discover />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/blocked" element={<BlockedSources />} />

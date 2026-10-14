@@ -1746,6 +1746,7 @@ var sensitiveSettings = map[string]bool{
 	"navidrome_password":    true,
 	"music_assistant_token": true,
 	"ticketmaster_api_key":  true,
+	"lastfm_api_key":        true,
 }
 
 var hiddenSettings = map[string]bool{

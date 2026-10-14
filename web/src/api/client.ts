@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, ArtistNameOption, AlbumCoverCandidate, LyricsReport, AuthStatus } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, DiscoverResponse, ArtistImageCandidate, ArtistNameOption, AlbumCoverCandidate, LyricsReport, AuthStatus } from '../types/index';
 
 const BASE = '/api';
 
@@ -90,6 +90,8 @@ export const api = {
   getUpcomingReleases: () => request<Album[]>('/releases/upcoming'),
   getConcerts: (refresh = false) =>
     request<ConcertsResponse>(`/concerts${refresh ? '?refresh=1' : ''}`),
+  getDiscover: (refresh = false) =>
+    request<DiscoverResponse>(`/discover${refresh ? '?refresh=1' : ''}`),
   refreshArtists: (ids: number[]) =>
     request<{ queued: number; ids: number[] }>(`/artists/refresh`, { method: 'POST', body: JSON.stringify({ ids }) }),
   getSyncStatus: () => request<{ items: ArtistSyncStatus[] }>('/artists/sync'),

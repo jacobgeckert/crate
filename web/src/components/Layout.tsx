@@ -56,6 +56,14 @@ function IconTicket({ className }: { className?: string }) {
   );
 }
 
+function IconCompass({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+  );
+}
+
 function IconSettings({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -72,6 +80,7 @@ const navItems = [
   { to: '/activity', label: 'Activity', Icon: IconActivity },
   { to: '/upcoming', label: 'Upcoming', Icon: IconCalendar },
   { to: '/shows', label: 'Shows', Icon: IconTicket },
+  { to: '/discover', label: 'Discover', Icon: IconCompass },
   { to: '/upload', label: 'Upload', Icon: IconUpload },
   { to: '/settings', label: 'Settings', Icon: IconSettings },
 ];
