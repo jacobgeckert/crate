@@ -210,9 +210,71 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 		sort.Slice(sh.Artists, func(i, j int) bool { return sh.Artists[i].Name < sh.Artists[j].Name })
 		out = append(out, *sh)
 	}
+	out = dedupeSameShow(out)
 	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
 	slog.Info("concerts: matched shows", "artists", len(artists), "failures", failCount, "shows", len(out))
 	return out, nil
+}
+
+// dedupeSameShow collapses double-listed events — TM sometimes serves the
+// same concert under two event ids with variant venue records ("Riviera
+// Theatre" vs "Riviera Theatre-IL"). Same date + normalized venue + city and
+// at least one shared watched artist means it's the same show. The artist
+// overlap requirement keeps genuinely different events at one venue on one
+// night distinct.
+func dedupeSameShow(shows []Show) []Show {
+	var merged []Show
+	slot := make(map[string]int)
+	artistIDs := make(map[int]map[int64]bool)
+	for _, sh := range shows {
+		key := sh.Date + "|" + venueKey(sh.Venue, sh.State) + "|" + normalizeName(sh.City)
+		if i, ok := slot[key]; ok && overlapsAny(sh.Artists, artistIDs[i]) {
+			ex := &merged[i]
+			for _, a := range sh.Artists {
+				if !artistIDs[i][a.ID] {
+					artistIDs[i][a.ID] = true
+					ex.Artists = append(ex.Artists, a)
+				}
+			}
+			sort.Slice(ex.Artists, func(x, y int) bool { return ex.Artists[x].Name < ex.Artists[y].Name })
+			// Prefer the cleaner venue variant (the "-IL" style suffix is the
+			// dup venue record) and fill any fields the first row lacked.
+			if sh.Venue != "" && (ex.Venue == "" || len(sh.Venue) < len(ex.Venue)) {
+				ex.Venue = sh.Venue
+			}
+			if ex.Image == "" {
+				ex.Image = sh.Image
+			}
+			continue
+		}
+		slot[key] = len(merged)
+		ids := make(map[int64]bool, len(sh.Artists))
+		for _, a := range sh.Artists {
+			ids[a.ID] = true
+		}
+		artistIDs[len(merged)] = ids
+		merged = append(merged, sh)
+	}
+	return merged
+}
+
+func overlapsAny(artists []ShowArtist, ids map[int64]bool) bool {
+	for _, a := range artists {
+		if ids[a.ID] {
+			return true
+		}
+	}
+	return false
+}
+
+// venueKey normalizes a venue for duplicate detection, dropping a trailing
+// state code so "Riviera Theatre-IL" (state IL) matches "Riviera Theatre".
+func venueKey(venue, state string) string {
+	v := normalizeName(venue)
+	if st := normalizeName(state); st != "" {
+		v = strings.TrimSuffix(v, " "+st)
+	}
+	return v
 }
 
 // geoParam resolves the configured postal code into Ticketmaster's latlong

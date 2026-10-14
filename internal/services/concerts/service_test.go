@@ -110,6 +110,55 @@ const tmCoBilledFeed = `{
   "page": {"number": 0, "totalPages": 1}
 }`
 
+const tmDupEventFeed = `{
+  "_embedded": {
+    "events": [
+      {
+        "id": "ev20", "name": "Blink Tour", "url": "https://tm.example/ev20",
+        "dates": {"start": {"localDate": "2026-08-01"}},
+        "_embedded": {
+          "venues": [{"name": "The Forum", "city": {"name": "Inglewood"}, "state": {"stateCode": "CA"}}],
+          "attractions": [{"id": "at1", "name": "blink-182"}]
+        }
+      },
+      {
+        "id": "ev21", "name": "Blink Tour", "url": "https://tm.example/ev21",
+        "dates": {"start": {"localDate": "2026-08-01"}},
+        "_embedded": {
+          "venues": [{"name": "The Forum-CA", "city": {"name": "Inglewood"}, "state": {"stateCode": "CA"}}],
+          "attractions": [{"id": "at5", "name": "blink-182"}]
+        }
+      }
+    ]
+  },
+  "page": {"number": 0, "totalPages": 1}
+}`
+
+// TM can list one concert under two event ids with duplicate venue records
+// ("The Forum" vs "The Forum-CA"). Same date + normalized venue + same
+// watched artist collapses into a single row.
+func TestShowsDedupesDuplicateEvents(t *testing.T) {
+	s, queries := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(tmDupEventFeed))
+	})
+	configure(t, queries)
+	if err := queries.CreateArtist(&models.Artist{Name: "blink-182", Provider: "test", ProviderID: "x", Status: models.ArtistStatusWatched}); err != nil {
+		t.Fatal(err)
+	}
+
+	shows, err := s.Shows(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shows) != 1 {
+		t.Fatalf("expected duplicate event merged, got %d: %+v", len(shows), shows)
+	}
+	if shows[0].Venue != "The Forum" {
+		t.Errorf("expected cleaner venue kept, got %q", shows[0].Venue)
+	}
+}
+
 // Two watched artists billed on the same event collapse into one listing —
 // each artist's feed matches the shared event, but the user sees a single
 // row naming both.
