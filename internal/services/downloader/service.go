@@ -416,7 +416,7 @@ func (s *Service) DownloadAlbum(ctx context.Context, albumID int64) {
 		if tracks[i].Status != models.TrackStatusWanted {
 			continue
 		}
-		tracks[i].ArtistName = artist.Name
+		tracks[i].ArtistName = artist.EffectiveName()
 		tracks[i].AlbumTitle = album.Title
 		wanted = append(wanted, &tracks[i])
 	}
@@ -424,10 +424,10 @@ func (s *Service) DownloadAlbum(ctx context.Context, albumID int64) {
 		return
 	}
 
-	query := artist.Name + " " + album.Title
+	query := artist.EffectiveName() + " " + album.Title
 	slog.Info("downloader: album search", "query", query, "album", album.Title, "wanted", len(wanted))
 	s.logActivity("search_started", "album", albumID,
-		fmt.Sprintf("Searching for album: %s - %s", artist.Name, album.Title))
+		fmt.Sprintf("Searching for album: %s - %s", artist.EffectiveName(), album.Title))
 
 	search, err := s.slskd.StartSearch(ctx, query)
 	if err != nil {

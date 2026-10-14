@@ -150,7 +150,7 @@ func (s *Service) trackMeta(track *models.Track) (*naming.Meta, *models.Artist, 
 		year = *album.Year
 	}
 	return &naming.Meta{
-		Artist: artist.Name,
+		Artist: artist.EffectiveName(),
 		Album:  album.Title,
 		Year:   year,
 		Track:  track.TrackNumber,
@@ -189,7 +189,7 @@ func (s *Service) tagFile(dest string, track *models.Track, artist *models.Artis
 	}
 	tagMeta := tagger.TrackMeta{
 		Title:       track.Title,
-		Artist:      artist.Name,
+		Artist:      artist.EffectiveName(),
 		Album:       album.Title,
 		TrackNumber: track.TrackNumber,
 		DiscNumber:  track.DiscNumber,

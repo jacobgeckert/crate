@@ -142,7 +142,7 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 		go func() {
 			defer wg.Done()
 			for a := range jobs {
-				events, err := s.artistEvents(ctx, apiKey, a.Name, geo, postal, radius, unit, refresh, tick.C)
+				events, err := s.artistEvents(ctx, apiKey, a.EffectiveName(), geo, postal, radius, unit, refresh, tick.C)
 				results <- artistResult{a, events, err}
 			}
 		}()
@@ -166,7 +166,10 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 			slog.Warn("concerts: artist events fetch failed", "artist", res.artist.Name, "error", res.err)
 			continue
 		}
-		want := normalizeName(res.artist.Name)
+		// Match either name — TM may bill the canonical or the overridden
+		// display name regardless of which one the keyword query used.
+		want := normalizeName(res.artist.EffectiveName())
+		wantCanon := normalizeName(res.artist.Name)
 		var matched, seenNames int
 		var sample []string
 		for _, ev := range res.events {
@@ -175,7 +178,7 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 				if len(sample) < 6 {
 					sample = append(sample, attr.Name)
 				}
-				if normalizeName(attr.Name) != want {
+				if attrName := normalizeName(attr.Name); attrName != want && attrName != wantCanon {
 					continue
 				}
 				matched++

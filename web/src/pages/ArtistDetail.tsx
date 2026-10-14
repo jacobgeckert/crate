@@ -9,6 +9,7 @@ import FilterBar from '../components/FilterBar';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
 import type { Track, Album, ProviderInfo } from '../types/index';
+import { artistName } from '../types/index';
 
 const ALBUM_TYPE_ORDER = [
   'album', 'ep', 'single', 'compilation',
@@ -82,6 +83,9 @@ export default function ArtistDetail() {
   const [reconciling, setReconciling] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [showImageEnlarge, setShowImageEnlarge] = useState(false);
+  const [showNameEdit, setShowNameEdit] = useState(false);
+  const [nameChoice, setNameChoice] = useState('');
+  const [customName, setCustomName] = useState('');
   const lastAlbumCount = useRef(-1);
   const reconcileTicks = useRef(0);
   const stableTicks = useRef(0);
@@ -112,6 +116,35 @@ export default function ArtistDetail() {
     queryFn: () => api.getArtistImageCandidates(Number(id)),
     enabled: showImagePicker,
   });
+
+  const { data: nameOptions } = useQuery({
+    queryKey: ['artist-name-options', id],
+    queryFn: () => api.getArtistNameOptions(Number(id)),
+    enabled: showNameEdit,
+  });
+
+  const setName = useMutation({
+    mutationFn: (displayName: string | null) => api.setArtistName(Number(id), displayName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['artist', id] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      setShowNameEdit(false);
+      toast('Artist name updated', 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const openNameEdit = () => {
+    setCustomName(artist?.display_name ?? '');
+    setNameChoice(artist?.display_name ? '__custom' : '');
+    setShowNameEdit(true);
+  };
+
+  const saveName = () => {
+    if (!artist) return;
+    const v = nameChoice === '__custom' ? customName.trim() : nameChoice;
+    setName.mutate(v === '' || v === artist.name ? null : v);
+  };
 
   const setImage = useMutation({
     mutationFn: (url: string) => api.setArtistImage(Number(id), url),
@@ -472,7 +505,21 @@ export default function ArtistDetail() {
           </div>
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-bold truncate">{artist.name}</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-lg font-bold truncate">{artistName(artist)}</h2>
+            <button
+              onClick={openNameEdit}
+              className="text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+              title="Edit display name"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+              </svg>
+            </button>
+          </div>
+          {artist.display_name && (
+            <p className="text-[10px] text-zinc-500 truncate">{artist.name}</p>
+          )}
           <div className="flex items-center gap-1.5 mt-0.5">
             <ProviderBadge provider={artist.provider} href={providerArtistUrl(artist.provider, artist.provider_id) ?? undefined} />
             <span className="text-[10px] text-zinc-600">
@@ -520,6 +567,58 @@ export default function ArtistDetail() {
           </button>
         </div>
       </div>
+
+      {showNameEdit && (
+        <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 animate-fade-in">
+          <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">Display name</p>
+          <div className="space-y-1">
+            {(nameOptions?.options ?? [{ name: artist.name, kind: 'canonical' as const }]).map((o) => (
+              <label key={o.name + o.kind} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={nameChoice === o.name}
+                  onChange={() => setNameChoice(o.name)}
+                  className="accent-blue-500 shrink-0"
+                />
+                <span className="truncate">{o.name}</span>
+                <span className="text-[10px] text-zinc-500 shrink-0">
+                  {o.kind === 'canonical' ? 'provider' : o.kind === 'sort_name' ? 'sort name' : 'alias'}
+                </span>
+              </label>
+            ))}
+            <label className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+              <input
+                type="radio"
+                checked={nameChoice === '__custom'}
+                onChange={() => setNameChoice('__custom')}
+                className="accent-blue-500 shrink-0"
+              />
+              <input
+                value={customName}
+                onChange={(e) => { setCustomName(e.target.value); setNameChoice('__custom'); }}
+                onFocus={() => setNameChoice('__custom')}
+                placeholder="Custom name…"
+                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm"
+              />
+            </label>
+          </div>
+          <div className="flex gap-2 mt-2.5">
+            <button
+              onClick={saveName}
+              disabled={setName.isPending}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white active:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {setName.isPending ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => setShowNameEdit(false)}
+              className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 active:text-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {artist.provider === 'local' && (
         <div className="bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2.5 mb-4">

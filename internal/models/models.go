@@ -37,8 +37,12 @@ const (
 )
 
 type Artist struct {
-	ID                    int64        `json:"id" db:"id"`
-	Name                  string       `json:"name" db:"name"`
+	ID   int64  `json:"id" db:"id"`
+	Name string `json:"name" db:"name"`
+	// DisplayName is a user-set override (e.g. "HANABIE." for 花冷え。). Empty
+	// means the provider-canonical Name is used. Kept separate so provider
+	// sync renames never clobber a user's choice.
+	DisplayName           *string      `json:"display_name,omitempty" db:"display_name"`
 	Provider              string       `json:"provider" db:"provider"`
 	ProviderID            string       `json:"provider_id" db:"provider_id"`
 	ImageURL              *string      `json:"image_url,omitempty" db:"image_url"`
@@ -57,6 +61,16 @@ type Artist struct {
 	// Sync is a live snapshot of background discography-sync progress — set
 	// only by the artist detail endpoint while a reconcile is running/has run.
 	Sync *SyncInfo `json:"sync,omitempty"`
+}
+
+// EffectiveName returns the display override when set, else the canonical
+// provider name. Everything user-facing — search queries, file naming,
+// concerts, UI — should go through this.
+func (a *Artist) EffectiveName() string {
+	if a.DisplayName != nil && *a.DisplayName != "" {
+		return *a.DisplayName
+	}
+	return a.Name
 }
 
 // SyncInfo reports progress of a background artist discography sync.

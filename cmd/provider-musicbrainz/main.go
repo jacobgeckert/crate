@@ -136,6 +136,7 @@ func (s *server) GetArtist(ctx context.Context, req *pb.EntityRequest) (*pb.Arti
 	var resp struct {
 		ID             string `json:"id"`
 		Name           string `json:"name"`
+		SortName       string `json:"sort-name"`
 		Country        string `json:"country"`
 		Disambiguation string `json:"disambiguation"`
 		Type           string `json:"type"`
@@ -143,9 +144,15 @@ func (s *server) GetArtist(ctx context.Context, req *pb.EntityRequest) (*pb.Arti
 			Begin string `json:"begin"`
 			End   string `json:"end"`
 		} `json:"life-span"`
+		Aliases []struct {
+			Name   string `json:"name"`
+			Type   string `json:"type"`
+			Ended  bool   `json:"ended"`
+			Locale string `json:"locale"`
+		} `json:"aliases"`
 	}
 
-	if err := s.get(ctx, "/artist/"+req.Id+"?fmt=json", &resp); err != nil {
+	if err := s.get(ctx, "/artist/"+req.Id+"?fmt=json&inc=aliases", &resp); err != nil {
 		return nil, err
 	}
 
@@ -161,6 +168,27 @@ func (s *server) GetArtist(ctx context.Context, req *pb.EntityRequest) (*pb.Arti
 	}
 	if resp.LifeSpan.Begin != "" {
 		meta["active_since"] = resp.LifeSpan.Begin
+	}
+	if resp.SortName != "" && resp.SortName != resp.Name {
+		meta["sort_name"] = resp.SortName
+	}
+	// Alternate names the artist is billed under — the UI offers them in the
+	// display-name picker (e.g. 花冷え。 → "HANABIE."). Ended aliases stay:
+	// a defunct name may still be how a user knows the band.
+	if len(resp.Aliases) > 0 {
+		names := make([]string, 0, len(resp.Aliases))
+		seen := map[string]bool{resp.Name: true, resp.SortName: true}
+		for _, al := range resp.Aliases {
+			if al.Name == "" || seen[al.Name] {
+				continue
+			}
+			seen[al.Name] = true
+			names = append(names, al.Name)
+		}
+		if len(names) > 0 {
+			b, _ := json.Marshal(names)
+			meta["aliases"] = string(b)
+		}
 	}
 
 	return &pb.ArtistDetail{

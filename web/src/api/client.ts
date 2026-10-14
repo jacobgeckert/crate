@@ -1,4 +1,4 @@
-import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, AlbumCoverCandidate, LyricsReport, AuthStatus } from '../types/index';
+import type { Artist, Album, AlbumEdition, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState, UploadBatch, UploadBatchSummary, UploadCommitResult, ArtistSyncStatus, ConcertsResponse, ArtistImageCandidate, ArtistNameOption, AlbumCoverCandidate, LyricsReport, AuthStatus } from '../types/index';
 
 const BASE = '/api';
 
@@ -99,6 +99,14 @@ export const api = {
       body: JSON.stringify({ ids, enabled }),
     }),
 
+  getArtistNameOptions: (id: number) =>
+    request<{ options: ArtistNameOption[] }>(`/artists/${id}/name-options`),
+  // null clears the override back to the provider-canonical name.
+  setArtistName: (id: number, displayName: string | null) =>
+    request<Artist>(`/artists/${id}/name`, {
+      method: 'PUT',
+      body: JSON.stringify({ display_name: displayName }),
+    }),
   getArtistImageCandidates: (id: number) =>
     request<{ candidates: ArtistImageCandidate[] }>(`/artists/${id}/images`),
   setArtistImage: (id: number, imageUrl: string) =>

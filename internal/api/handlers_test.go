@@ -156,6 +156,10 @@ func (f *fakeProvider) GetArtist(ctx context.Context, req *pb.EntityRequest) (*p
 			Id:       "1000",
 			Name:     "Test Artist",
 			ImageUrl: "http://img/artist.jpg",
+			Metadata: map[string]string{
+				"sort_name": "Artist, Test",
+				"aliases":   `["TA","The Test Artists"]`,
+			},
 		}, nil
 	}
 	return nil, fmt.Errorf("artist not found")
@@ -1350,6 +1354,73 @@ func TestUnignoreUpcomingAlbumDefersSearch(t *testing.T) {
 	got, _ := env.queries.GetTrack(tr.ID)
 	if got == nil || got.Status != models.TrackStatusWanted {
 		t.Errorf("track should be wanted after unignore, got %+v", got)
+	}
+}
+
+// The display-name override rides along on artist responses and clears back
+// to NULL — the canonical name is never touched.
+func TestSetArtistDisplayName(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	id := artists[0].ID
+
+	w := env.do("PUT", fmt.Sprintf("/api/artists/%d/name", id), `{"display_name":"HANABIE."}`)
+	if w.Code != 200 {
+		t.Fatalf("set name: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got, _ := env.queries.GetArtist(id)
+	if got.DisplayName == nil || *got.DisplayName != "HANABIE." {
+		t.Fatalf("display_name not stored: %+v", got.DisplayName)
+	}
+	if got.EffectiveName() != "HANABIE." || got.Name != "Test Artist" {
+		t.Errorf("effective/canonical split wrong: %+v", got)
+	}
+
+	// Empty string clears the override.
+	w = env.do("PUT", fmt.Sprintf("/api/artists/%d/name", id), `{"display_name":""}`)
+	if w.Code != 200 {
+		t.Fatalf("clear name: expected 200, got %d", w.Code)
+	}
+	got, _ = env.queries.GetArtist(id)
+	if got.DisplayName != nil {
+		t.Errorf("display_name not cleared: %v", *got.DisplayName)
+	}
+}
+
+// Name options come from the provider: canonical + sort name + aliases.
+func TestArtistNameOptions(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	w := env.do("GET", fmt.Sprintf("/api/artists/%d/name-options", artists[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("name options: expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Options []struct {
+			Name string `json:"name"`
+			Kind string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	want := [][2]string{
+		{"Test Artist", "canonical"},
+		{"Artist, Test", "sort_name"},
+		{"TA", "alias"},
+		{"The Test Artists", "alias"},
+	}
+	if len(resp.Options) != len(want) {
+		t.Fatalf("expected %d options, got %+v", len(want), resp.Options)
+	}
+	for i, o := range resp.Options {
+		if o.Name != want[i][0] || o.Kind != want[i][1] {
+			t.Errorf("option %d = %+v, want %v", i, o, want[i])
+		}
 	}
 }
 

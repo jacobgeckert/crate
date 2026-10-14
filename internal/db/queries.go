@@ -42,9 +42,9 @@ func (q *Queries) GetArtist(id int64) (*models.Artist, error) {
 	a := &models.Artist{}
 	var typesJSON sql.NullString
 	err := q.db.QueryRow(
-		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, watch_release_types, created_at, updated_at
+		`SELECT id, name, display_name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, watch_release_types, created_at, updated_at
 		 FROM artists WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &typesJSON, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &typesJSON, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (q *Queries) SetArtistWatchReleaseTypes(id int64, types map[string]bool) er
 
 func (q *Queries) ListArtists() ([]models.Artist, error) {
 	rows, err := q.db.Query(
-		`SELECT a.id, a.name, a.provider, a.provider_id, a.image_url, a.status, a.watch_new_releases, a.watch_new_releases_since, a.created_at, a.updated_at,
+		`SELECT a.id, a.name, a.display_name, a.provider, a.provider_id, a.image_url, a.status, a.watch_new_releases, a.watch_new_releases_since, a.created_at, a.updated_at,
 		        COUNT(t.id) as total_tracks,
 		        COALESCE(SUM(CASE WHEN t.status = 'owned' THEN 1 ELSE 0 END), 0) as owned_tracks
 		 FROM artists a
@@ -110,7 +110,7 @@ func (q *Queries) ListArtists() ([]models.Artist, error) {
 	var artists []models.Artist
 	for rows.Next() {
 		var a models.Artist
-		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status,
+		if err := rows.Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status,
 			&a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt, &a.TotalTracks, &a.OwnedTracks); err != nil {
 			return nil, err
 		}
@@ -126,6 +126,16 @@ func (q *Queries) UpdateArtistStatus(id int64, status models.ArtistStatus) error
 
 func (q *Queries) UpdateArtistName(id int64, name string) error {
 	_, err := q.db.Exec(`UPDATE artists SET name = ?, updated_at = ? WHERE id = ?`, name, now(), id)
+	return err
+}
+
+// SetArtistDisplayName sets the user's display override; nil or empty clears
+// it back to the provider-canonical name.
+func (q *Queries) SetArtistDisplayName(id int64, name *string) error {
+	if name != nil && *name == "" {
+		name = nil
+	}
+	_, err := q.db.Exec(`UPDATE artists SET display_name = ?, updated_at = ? WHERE id = ?`, name, now(), id)
 	return err
 }
 
@@ -160,9 +170,9 @@ func (q *Queries) DeleteArtist(id int64) error {
 func (q *Queries) FindArtistByProvider(provider, providerID string) (*models.Artist, error) {
 	a := &models.Artist{}
 	err := q.db.QueryRow(
-		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
+		`SELECT id, name, display_name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
 		 FROM artists WHERE provider = ? AND provider_id = ?`, provider, providerID,
-	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -175,9 +185,9 @@ func (q *Queries) FindArtistByProvider(provider, providerID string) (*models.Art
 func (q *Queries) FindArtistByNameFold(name string) (*models.Artist, error) {
 	a := &models.Artist{}
 	err := q.db.QueryRow(
-		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
+		`SELECT id, name, display_name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
 		 FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1`, name,
-	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +196,7 @@ func (q *Queries) FindArtistByNameFold(name string) (*models.Artist, error) {
 
 func (q *Queries) ListWatchedArtists() ([]models.Artist, error) {
 	rows, err := q.db.Query(
-		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
+		`SELECT id, name, display_name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
 		 FROM artists WHERE watch_new_releases = 1 ORDER BY name`,
 	)
 	if err != nil {
@@ -197,7 +207,7 @@ func (q *Queries) ListWatchedArtists() ([]models.Artist, error) {
 	var artists []models.Artist
 	for rows.Next() {
 		var a models.Artist
-		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status,
+		if err := rows.Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status,
 			&a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -297,7 +307,7 @@ func (q *Queries) CreateAlbum(a *models.Album) error {
 // or later, soonest first, for the Upcoming page.
 func (q *Queries) ListUpcomingReleases(today string) ([]models.Album, error) {
 	rows, err := q.db.Query(
-		`SELECT a.id, a.artist_id, a.title, a.year, a.provider, a.provider_id, a.cover_url, a.record_type, a.release_date, a.status, a.created_at, a.updated_at, ar.name
+		`SELECT a.id, a.artist_id, a.title, a.year, a.provider, a.provider_id, a.cover_url, a.record_type, a.release_date, a.status, a.created_at, a.updated_at, COALESCE(ar.display_name, ar.name)
 		 FROM albums a JOIN artists ar ON ar.id = a.artist_id
 		 WHERE a.release_date IS NOT NULL AND a.release_date != '' AND a.release_date >= ? AND a.status != 'ignored'
 		 ORDER BY a.release_date ASC
@@ -338,7 +348,7 @@ func (q *Queries) GetAlbum(id int64) (*models.Album, error) {
 	a := &models.Album{}
 	err := q.db.QueryRow(
 		`SELECT al.id, al.artist_id, al.title, al.year, al.provider, al.provider_id, al.cover_url, al.record_type, al.release_date, al.release_id, al.status,
-		        al.created_at, al.updated_at, ar.name
+		        al.created_at, al.updated_at, COALESCE(ar.display_name, ar.name)
 		 FROM albums al JOIN artists ar ON ar.id = al.artist_id
 		 WHERE al.id = ?`, id,
 	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.ReleaseDate, &a.ReleaseID, &a.Status,
@@ -710,7 +720,7 @@ func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.mb_recording_id, t.created_at, t.updated_at,
-		        al.title, ar.name
+		        al.title, COALESCE(ar.display_name, ar.name)
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
@@ -751,12 +761,12 @@ func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 	                 t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-	                 al.title, ar.name
+	                 al.title, COALESCE(ar.display_name, ar.name)
 	          FROM tracks t
 	          JOIN albums al ON al.id = t.album_id
 	          JOIN artists ar ON ar.id = al.artist_id
 	          WHERE t.status = 'wanted'` + wantedReleaseClause + wantedSingleClause + `
-	          ORDER BY ar.name, al.year, t.disc_number, t.track_number`
+	          ORDER BY COALESCE(ar.display_name, ar.name), al.year, t.disc_number, t.track_number`
 	var args []any
 	if limit > 0 {
 		query += " LIMIT ?"
@@ -774,7 +784,7 @@ func (q *Queries) ListWantedTracksWithCooldown(cooldownCutoff string, limit int)
 	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 	                 t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-	                 al.title, ar.name
+	                 al.title, COALESCE(ar.display_name, ar.name)
 	          FROM tracks t
 	          JOIN albums al ON al.id = t.album_id
 	          JOIN artists ar ON ar.id = al.artist_id
@@ -784,7 +794,7 @@ func (q *Queries) ListWantedTracksWithCooldown(cooldownCutoff string, limit int)
 	              WHERE d.track_id = t.id AND d.status = 'failed'
 	                AND d.last_attempt > ?
 	            )
-	          ORDER BY ar.name, al.year, t.disc_number, t.track_number`
+	          ORDER BY COALESCE(ar.display_name, ar.name), al.year, t.disc_number, t.track_number`
 	args := []any{cooldownCutoff}
 	if limit > 0 {
 		query += " LIMIT ?"
@@ -818,7 +828,7 @@ func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, erro
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-		        al.title, ar.name
+		        al.title, COALESCE(ar.display_name, ar.name)
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
@@ -849,7 +859,7 @@ func (q *Queries) ListWantedTracksByAlbum(albumID int64) ([]models.Track, error)
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-		        al.title, ar.name
+		        al.title, COALESCE(ar.display_name, ar.name)
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
@@ -911,7 +921,7 @@ func (q *Queries) ListOwnedTracksByArtist(artistID int64) ([]models.Track, error
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-		        al.title, ar.name
+		        al.title, COALESCE(ar.display_name, ar.name)
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
@@ -940,9 +950,9 @@ func (q *Queries) ListOwnedTracksByArtist(artistID int64) ([]models.Track, error
 func (q *Queries) NextArtistForUpgrade(lastID int64) (*models.Artist, error) {
 	a := &models.Artist{}
 	err := q.db.QueryRow(
-		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
+		`SELECT id, name, display_name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
 		 FROM artists WHERE id > ? ORDER BY id LIMIT 1`, lastID,
-	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,7 +1035,7 @@ func (q *Queries) ListDownloads(status string) ([]models.DownloadQueueItem, erro
 
 func (q *Queries) ListDownloadsWithTrack(status string) ([]models.DownloadQueueItem, error) {
 	query := `SELECT d.id, d.track_id, d.slskd_search_id, d.status, d.attempts, d.last_attempt, d.error, d.next_retry_at, d.source, d.last_progress_bytes, d.created_at,
-		        t.title, ar.name, al.title, t.album_id, t.disc_number, t.track_number, al.cover_url
+		        t.title, COALESCE(ar.display_name, ar.name), al.title, t.album_id, t.disc_number, t.track_number, al.cover_url
 		 FROM download_queue d
 		 JOIN tracks t ON t.id = d.track_id
 		 JOIN albums al ON al.id = t.album_id
@@ -1310,12 +1320,13 @@ func (q *Queries) FindOwnedTrackByName(artist, title string) (*models.Track, err
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
 		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-		        al.title, ar.name
+		        al.title, COALESCE(ar.display_name, ar.name)
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
-		 WHERE ar.name = ? COLLATE NOCASE AND t.title = ? COLLATE NOCASE AND t.status = 'owned'
-		 LIMIT 1`, artist, title,
+		 WHERE (ar.name = ? COLLATE NOCASE OR ar.display_name = ? COLLATE NOCASE)
+		   AND t.title = ? COLLATE NOCASE AND t.status = 'owned'
+		 LIMIT 1`, artist, artist, title,
 	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
 		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
@@ -1332,12 +1343,12 @@ func (q *Queries) SearchLibrary(query string, limit int) ([]LibrarySearchResult,
 	}
 	pattern := "%" + query + "%"
 	rows, err := q.db.Query(
-		`SELECT ar.id, ar.name, al.id, al.title, t.id, t.title
+		`SELECT ar.id, COALESCE(ar.display_name, ar.name), al.id, al.title, t.id, t.title
 		 FROM tracks t
 		 JOIN albums al ON al.id = t.album_id
 		 JOIN artists ar ON ar.id = al.artist_id
 		 WHERE t.title LIKE ? COLLATE NOCASE
-		 ORDER BY ar.name, al.title, t.track_number
+		 ORDER BY COALESCE(ar.display_name, ar.name), al.title, t.track_number
 		 LIMIT ?`,
 		pattern, limit,
 	)

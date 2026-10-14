@@ -1,6 +1,9 @@
 export interface Artist {
   id: number;
   name: string;
+  // User-set display override (e.g. "HANABIE." for 花冷え。) — empty/absent
+  // means the provider-canonical name is shown.
+  display_name?: string;
   provider: string;
   provider_id: string;
   image_url?: string;
@@ -368,6 +371,16 @@ export interface Show {
 export interface ConcertsResponse {
   configured: boolean;
   shows: Show[];
+}
+
+// artistName is the name to display/query with — the user's override when set.
+export function artistName(a: { name: string; display_name?: string }): string {
+  return a.display_name || a.name;
+}
+
+export interface ArtistNameOption {
+  name: string;
+  kind: 'canonical' | 'sort_name' | 'alias';
 }
 
 export interface ArtistImageCandidate {

@@ -670,6 +670,76 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, artist)
 }
 
+// handleSetArtistName sets or clears the display-name override. The canonical
+// provider name is untouched — sync renames keep working and the override can
+// always be cleared back.
+func (s *Server) handleSetArtistName(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		DisplayName *string `json:"display_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	var name *string
+	if req.DisplayName != nil {
+		trimmed := strings.TrimSpace(*req.DisplayName)
+		name = &trimmed
+	}
+	if err := s.queries.SetArtistDisplayName(id, name); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set name")
+		return
+	}
+	artist, err := s.queries.GetArtist(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, artist)
+}
+
+// handleArtistNameOptions returns the alternate names the artist's provider
+// knows — canonical, sort-name, and aliases — for the display-name picker.
+func (s *Server) handleArtistNameOptions(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	artist, err := s.queries.GetArtist(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "artist not found")
+		return
+	}
+	type option struct {
+		Name string `json:"name"`
+		Kind string `json:"kind"` // canonical | sort_name | alias
+	}
+	options := []option{{Name: artist.Name, Kind: "canonical"}}
+	seen := map[string]bool{artist.Name: true}
+	if detail, derr := s.providers.GetArtist(r.Context(), artist.Provider, artist.ProviderID); derr == nil && detail != nil {
+		if sn := detail.Metadata["sort_name"]; sn != "" && !seen[sn] {
+			seen[sn] = true
+			options = append(options, option{Name: sn, Kind: "sort_name"})
+		}
+		var aliases []string
+		if raw := detail.Metadata["aliases"]; raw != "" && json.Unmarshal([]byte(raw), &aliases) == nil {
+			for _, a := range aliases {
+				if a != "" && !seen[a] {
+					seen[a] = true
+					options = append(options, option{Name: a, Kind: "alias"})
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"options": options})
+}
+
 // handleArtistImageCandidates searches every healthy provider for the watched
 // artist's name and returns the distinct artist image URLs found, so the user
 // can correct an auto-picked photo. Local providers are skipped — they never

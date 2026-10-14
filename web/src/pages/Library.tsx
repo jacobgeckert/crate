@@ -9,6 +9,7 @@ import { formatRelativeDate, providerArtistUrl, PROVIDER_LABEL } from '../lib/fo
 import { usePlayer } from '../components/Player';
 import { useToast } from '../components/Toast';
 import type { Artist } from '../types/index';
+import { artistName } from '../types/index';
 
 type LibrarySort = 'az' | 'recent';
 
@@ -59,6 +60,7 @@ export default function Library() {
     const q = debouncedFilter.toLowerCase();
     return artists.filter((a) => {
       if (a.name.toLowerCase().includes(q)) return true;
+      if (a.display_name?.toLowerCase().includes(q)) return true;
       return matchedArtistIds?.has(a.id) ?? false;
     });
   }, [artists, debouncedFilter, matchedArtistIds]);
@@ -317,7 +319,7 @@ export default function Library() {
                   key={artist.id}
                   artist={artist}
                   matchCount={matchCountByArtist?.get(artist.id)}
-                  isTrackMatch={!!matchedArtistIds?.has(artist.id) && !artist.name.toLowerCase().includes(debouncedFilter.toLowerCase())}
+                  isTrackMatch={!!matchedArtistIds?.has(artist.id) && !artistName(artist).toLowerCase().includes(debouncedFilter.toLowerCase())}
                   {...rowProps(artist)}
                 />
               ))}
@@ -485,7 +487,7 @@ function ArtistCard({
     >
       <div className="relative aspect-square bg-zinc-700">
         {artist.image_url ? (
-          <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" loading="lazy" />
+          <img src={artist.image_url} alt={artistName(artist)} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-zinc-500">
             <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
@@ -530,7 +532,7 @@ function ArtistCard({
         )}
       </div>
       <div className="p-2">
-        <p className="text-xs font-medium truncate" title={artist.name}>{artist.name}</p>
+        <p className="text-xs font-medium truncate" title={artistName(artist)}>{artistName(artist)}</p>
         {isTrackMatch && matchCount ? (
           <p className="text-[10px] text-zinc-500 mt-0.5">{matchCount} matching track{matchCount > 1 ? 's' : ''}</p>
         ) : (
@@ -564,12 +566,12 @@ function ArtistCard({
 
 function groupByLetter(artists: Artist[]): { letter: string; artists: Artist[] }[] {
   const sorted = [...artists].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    artistName(a).localeCompare(artistName(b), undefined, { sensitivity: 'base' })
   );
 
   const groups: { letter: string; artists: Artist[] }[] = [];
   for (const artist of sorted) {
-    const first = artist.name[0]?.toUpperCase() ?? '#';
+    const first = artistName(artist)[0]?.toUpperCase() ?? '#';
     // Latin letters get their own section. Non-Latin letters (e.g. 花冷え。)
     // get a section per leading character rather than sharing '#' — that
     // bucket is reserved for digits and symbols, and a second '#' section
