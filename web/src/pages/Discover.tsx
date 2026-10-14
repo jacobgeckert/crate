@@ -43,12 +43,12 @@ export default function Discover() {
       <p className="text-sm text-zinc-500 mb-4">Artists similar to ones you watch, via Last.fm</p>
 
       {isLoading && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
-          {[...Array(10)].map((_, i) => (
-            <div key={i} className="rounded-lg overflow-hidden bg-zinc-800/40 animate-pulse">
-              <div className="aspect-square bg-zinc-800" />
-              <div className="p-2 space-y-1.5">
-                <div className="h-3 bg-zinc-800 rounded w-3/4" />
+        <div className="space-y-1">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 bg-zinc-800/40 rounded-lg p-2 animate-pulse">
+              <div className="w-12 h-12 rounded bg-zinc-800 shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 bg-zinc-800 rounded w-1/3" />
                 <div className="h-2.5 bg-zinc-800 rounded w-1/2" />
               </div>
             </div>
@@ -75,16 +75,16 @@ export default function Discover() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+      <div className="space-y-1">
         {suggestions.map((s) => (
-          <SuggestionCard key={s.mbid ?? s.name} suggestion={s} />
+          <SuggestionRow key={s.mbid ?? s.name} suggestion={s} />
         ))}
       </div>
     </div>
   );
 }
 
-function SuggestionCard({ suggestion: s }: { suggestion: Suggestion }) {
+function SuggestionRow({ suggestion: s }: { suggestion: Suggestion }) {
   const [expanded, setExpanded] = useState(false);
   const to = s.mbid
     ? `/browse/artist/${s.mbid}?provider=musicbrainz`
@@ -92,29 +92,32 @@ function SuggestionCard({ suggestion: s }: { suggestion: Suggestion }) {
 
   return (
     <Link to={to} className="block">
-      <div className="rounded-lg overflow-hidden transition-colors bg-zinc-800/40 hover:bg-zinc-800/70">
-        <div className="relative aspect-square bg-zinc-700">
+      <div className="flex items-center gap-3 bg-zinc-800/40 hover:bg-zinc-800/70 rounded-lg p-2 transition-colors">
+        <div className="w-12 h-12 rounded bg-zinc-700 overflow-hidden shrink-0">
           {s.image_url ? (
             <img src={s.image_url} alt={s.name} className="w-full h-full object-cover" loading="lazy" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-zinc-500">
-              <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
             </div>
           )}
         </div>
-        <div className="p-2">
-          <p className="text-xs font-medium truncate" title={s.name}>{s.name}</p>
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm truncate" title={s.name}>{s.name}</p>
           <p
             role="button"
             tabIndex={0}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); } }}
-            className={`text-[10px] text-zinc-500 mt-0.5 cursor-pointer ${expanded ? '' : 'line-clamp-2'}`}
+            className={`text-[11px] text-zinc-500 mt-0.5 cursor-pointer ${expanded ? '' : 'line-clamp-2'}`}
             title={expanded ? 'Show less' : s.artists.join(', ')}
           >
             because you watch {s.artists.join(', ')}
           </p>
         </div>
+        <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m9 18 6-6-6-6" />
+        </svg>
       </div>
     </Link>
   );
