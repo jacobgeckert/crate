@@ -1,10 +1,21 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/services/discover"
+)
+
+const (
+	discoverImageProvider = "deezer" // same source enrichArtistImage uses
+	discoverImageTTL      = 14 * 24 * time.Hour
 )
 
 func (s *Server) handleGetDiscover(w http.ResponseWriter, r *http.Request) {
@@ -21,5 +32,66 @@ func (s *Server) handleGetDiscover(w http.ResponseWriter, r *http.Request) {
 	if suggestions == nil {
 		suggestions = []discover.Suggestion{}
 	}
+	s.enrichSuggestionImages(r.Context(), suggestions, refresh)
 	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "suggestions": suggestions})
+}
+
+// enrichSuggestionImages fills ImageURL on each suggestion by looking the name
+// up on the image provider (deezer). Results — including misses — cache two
+// weeks so repeat page loads don't re-search. Runs a few lookups in parallel;
+// the provider's own rate limiter keeps it inside the deezer budget.
+func (s *Server) enrichSuggestionImages(ctx context.Context, suggestions []discover.Suggestion, refresh bool) {
+	if !s.providers.IsHealthy(discoverImageProvider) {
+		return
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i := range suggestions {
+		wg.Add(1)
+		go func(sug *discover.Suggestion) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			sug.ImageURL = s.suggestionImage(ctx, sug.Name, refresh)
+		}(&suggestions[i])
+	}
+	wg.Wait()
+}
+
+func (s *Server) suggestionImage(ctx context.Context, name string, refresh bool) string {
+	cacheKey := "discover:image:" + strings.ToLower(strings.TrimSpace(name))
+	if !refresh {
+		if raw, hit := s.cache.Get(cacheKey); hit {
+			var cached string
+			if json.Unmarshal(raw, &cached) == nil {
+				return cached
+			}
+		}
+	}
+	res, err := s.providers.SearchWithProvider(ctx, discoverImageProvider, name, 5, 0)
+	if err != nil {
+		slog.Debug("discover: image lookup failed", "artist", name, "error", err)
+		return ""
+	}
+	url := ""
+	var fallback string
+	for _, a := range res.Artists {
+		if a.ImageUrl == "" {
+			continue
+		}
+		if fallback == "" {
+			fallback = a.ImageUrl
+		}
+		if strings.EqualFold(a.Name, name) {
+			url = a.ImageUrl
+			break
+		}
+	}
+	if url == "" {
+		url = fallback
+	}
+	if raw, err := json.Marshal(url); err == nil {
+		s.cache.Set(cacheKey, raw, discoverImageTTL)
+	}
+	return url
 }

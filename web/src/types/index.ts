@@ -378,6 +378,7 @@ export interface Suggestion {
   mbid?: string;
   score: number;
   artists: string[]; // watched artists it's similar to
+  image_url?: string;
 }
 
 export interface DiscoverResponse {

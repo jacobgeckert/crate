@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import type { Suggestion } from '../types/index';
 
 export default function Discover() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   const { data, isLoading } = useQuery({
@@ -23,21 +23,10 @@ export default function Discover() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
-  const watch = useMutation({
-    mutationFn: (mbid: string) => api.watchArtist(mbid, { provider: 'musicbrainz' }),
-    onSuccess: (_artist, mbid) => {
-      queryClient.invalidateQueries({ queryKey: ['artists'] });
-      queryClient.setQueryData(['discover'], (d: typeof data) =>
-        d ? { ...d, suggestions: d.suggestions.filter((s) => s.mbid !== mbid) } : d);
-      toast('Artist added to your library', 'success');
-    },
-    onError: (err: Error) => toast(err.message, 'error'),
-  });
-
   const suggestions = data?.suggestions ?? [];
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div>
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-bold">Discover</h1>
         {data?.configured && (
@@ -53,9 +42,15 @@ export default function Discover() {
       <p className="text-sm text-zinc-500 mb-4">Artists similar to ones you watch, via Last.fm</p>
 
       {isLoading && (
-        <div className="space-y-2">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-14 bg-zinc-800/40 rounded-lg animate-pulse" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+          {[...Array(10)].map((_, i) => (
+            <div key={i} className="rounded-lg overflow-hidden bg-zinc-800/40 animate-pulse">
+              <div className="aspect-square bg-zinc-800" />
+              <div className="p-2 space-y-1.5">
+                <div className="h-3 bg-zinc-800 rounded w-3/4" />
+                <div className="h-2.5 bg-zinc-800 rounded w-1/2" />
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -79,34 +74,39 @@ export default function Discover() {
         </div>
       )}
 
-      <div className="space-y-1">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
         {suggestions.map((s) => (
-          <div key={s.mbid ?? s.name} className="flex items-center gap-2.5 bg-zinc-800/40 rounded-lg p-2.5">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm truncate">{s.name}</p>
-              <p className="text-[11px] text-zinc-500 truncate">
-                because you watch {s.artists.slice(0, 3).join(', ')}{s.artists.length > 3 ? ` +${s.artists.length - 3}` : ''}
-              </p>
-            </div>
-            {s.mbid ? (
-              <button
-                onClick={() => watch.mutate(s.mbid!)}
-                disabled={watch.isPending && watch.variables === s.mbid}
-                className="text-[11px] font-medium bg-zinc-700 text-zinc-200 rounded-lg px-3 py-1.5 active:bg-zinc-600 transition-colors disabled:opacity-50 shrink-0"
-              >
-                {watch.isPending && watch.variables === s.mbid ? 'Adding…' : 'Watch'}
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate(`/search?q=${encodeURIComponent(s.name)}`)}
-                className="text-[11px] font-medium bg-zinc-800 text-zinc-400 rounded-lg px-3 py-1.5 active:bg-zinc-700 transition-colors shrink-0"
-              >
-                Search
-              </button>
-            )}
-          </div>
+          <SuggestionCard key={s.mbid ?? s.name} suggestion={s} />
         ))}
       </div>
     </div>
+  );
+}
+
+function SuggestionCard({ suggestion: s }: { suggestion: Suggestion }) {
+  const to = s.mbid
+    ? `/browse/artist/${s.mbid}?provider=musicbrainz`
+    : `/search?q=${encodeURIComponent(s.name)}`;
+
+  return (
+    <Link to={to} className="block">
+      <div className="rounded-lg overflow-hidden transition-colors bg-zinc-800/40 hover:bg-zinc-800/70">
+        <div className="relative aspect-square bg-zinc-700">
+          {s.image_url ? (
+            <img src={s.image_url} alt={s.name} className="w-full h-full object-cover" loading="lazy" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-zinc-500">
+              <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            </div>
+          )}
+        </div>
+        <div className="p-2">
+          <p className="text-xs font-medium truncate" title={s.name}>{s.name}</p>
+          <p className="text-[10px] text-zinc-500 mt-0.5 truncate" title={s.artists.join(', ')}>
+            because you watch {s.artists.slice(0, 2).join(', ')}{s.artists.length > 2 ? ` +${s.artists.length - 2}` : ''}
+          </p>
+        </div>
+      </div>
+    </Link>
   );
 }

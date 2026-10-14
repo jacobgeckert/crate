@@ -37,10 +37,11 @@ var ErrNotConfigured = errors.New("discover not configured: set lastfm_api_key i
 
 // Suggestion is an artist the user doesn't watch, ranked by combined match.
 type Suggestion struct {
-	Name    string   `json:"name"`
-	MBID    string   `json:"mbid,omitempty"`
-	Score   float64  `json:"score"`   // summed last.fm match across related artists
-	Artists []string `json:"artists"` // watched artists it's similar to — "because you watch…"
+	Name     string   `json:"name"`
+	MBID     string   `json:"mbid,omitempty"`
+	Score    float64  `json:"score"`               // summed last.fm match across related artists
+	Artists  []string `json:"artists"`             // watched artists it's similar to — "because you watch…"
+	ImageURL string   `json:"image_url,omitempty"` // filled by the API layer via provider lookup
 }
 
 type Service struct {
