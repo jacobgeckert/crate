@@ -12,9 +12,10 @@ const knownKeys: Record<string, (v: string) => string> = {
 
 const keyOrder = ['type', 'country', 'disambiguation', 'active_since', 'fans'];
 
-// Internal plumbing keys that aren't display metadata (e.g. the serialized
-// edition list the album page's picker consumes).
-const hiddenKeys = new Set(['releases']);
+// Internal plumbing keys that aren't display metadata: the serialized
+// edition list the album picker consumes, and sort_name/aliases which feed
+// the artist name picker.
+const hiddenKeys = new Set(['releases', 'sort_name', 'aliases']);
 
 export default function MetadataPills({ metadata }: { metadata?: Record<string, string> }) {
   if (!metadata) return null;
