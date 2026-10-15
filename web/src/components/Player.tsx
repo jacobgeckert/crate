@@ -330,7 +330,7 @@ function FullPlayer({
           )}
         </div>
 
-        <div className="flex-1 flex items-center justify-center min-h-0">
+        <div className="flex-1 relative flex items-center justify-center min-h-0">
           {showLyrics ? (
             <LyricsView trackId={current.id} time={time} />
           ) : current.coverUrl ? (
@@ -481,20 +481,28 @@ function LyricsView({ trackId, time }: { trackId: number; time: number }) {
   }, [activeIdx]);
 
   if (isLoading) {
-    return <div className="w-8 h-8 rounded-full border-2 border-zinc-600 border-t-emerald-400 animate-spin" />;
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-zinc-600 border-t-emerald-400 animate-spin" />
+      </div>
+    );
   }
   if (!data) {
-    return <p className="text-sm text-zinc-500">No lyrics found for this track</p>;
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <p className="text-sm text-zinc-500">No lyrics found for this track</p>
+      </div>
+    );
   }
   if (!data.synced) {
     return (
-      <div className="h-full w-full overflow-y-auto">
+      <div className="absolute inset-0 overflow-y-auto">
         <p className="whitespace-pre-wrap text-sm text-zinc-300 text-center leading-relaxed py-4">{data.text}</p>
       </div>
     );
   }
   return (
-    <div className="h-full w-full overflow-y-auto py-[40%] text-center">
+    <div className="absolute inset-0 overflow-y-auto py-[35vh] text-center">
       {lines.map((l, i) => (
         <p
           key={i}
