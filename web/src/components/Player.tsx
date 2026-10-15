@@ -476,6 +476,10 @@ function LyricsView({ trackId, time }: { trackId: number; time: number }) {
     return idx;
   }, [lines, time]);
   const activeRef = useRef<HTMLParagraphElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [data]);
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [activeIdx]);
@@ -496,13 +500,13 @@ function LyricsView({ trackId, time }: { trackId: number; time: number }) {
   }
   if (!data.synced) {
     return (
-      <div className="absolute inset-0 overflow-y-auto">
+      <div ref={scrollRef} className="absolute inset-0 overflow-y-auto">
         <p className="whitespace-pre-wrap text-sm text-zinc-300 text-center leading-relaxed py-4">{data.text}</p>
       </div>
     );
   }
   return (
-    <div className="absolute inset-0 overflow-y-auto py-[35vh] text-center">
+    <div ref={scrollRef} className="absolute inset-0 overflow-y-auto py-[35vh] text-center">
       {lines.map((l, i) => (
         <p
           key={i}
