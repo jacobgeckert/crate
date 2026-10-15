@@ -67,12 +67,12 @@ function fmtTime(s: number): string {
 function PlayerBar() {
   const { current, hasNext, hasPrev, next, prev, close } = usePlayer();
   const audioRef = useRef<HTMLAudioElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const raf = useRef(0);
 
   // rAF-driven progress — the audio element's timeupdate only fires ~4Hz,
@@ -91,13 +91,33 @@ function PlayerBar() {
   }, [current]);
 
   const seek = (e: React.PointerEvent<HTMLDivElement>) => {
-    const bar = barRef.current;
+    const bar = e.currentTarget;
     const a = audioRef.current;
     if (!bar || !a || !duration) return;
     const rect = bar.getBoundingClientRect();
     const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     a.currentTime = frac * duration;
     setTime(a.currentTime);
+  };
+
+  const togglePlay = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) a.play(); else a.pause();
+  };
+
+  const toggleMute = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.muted = !muted;
+    setMuted(!muted);
+  };
+
+  const setVol = (v: number) => {
+    const a = audioRef.current;
+    if (a) { a.volume = v; a.muted = false; }
+    setVolume(v);
+    setMuted(false);
   };
 
   if (!current) return null;
@@ -110,21 +130,27 @@ function PlayerBar() {
       <div className="h-16" />
       <div className="fixed left-0 right-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:bottom-0 z-50 bg-zinc-900/95 backdrop-blur-sm border-t border-zinc-800 px-3 py-2">
         <div className="flex items-center gap-3">
-          {current.coverUrl ? (
-            <img src={current.coverUrl} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
-          ) : (
-            <div className="w-10 h-10 rounded bg-zinc-800 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-              </svg>
-            </div>
-          )}
-          <div className="min-w-0 w-36 sm:w-48 shrink-0">
-            <p className="text-sm font-semibold text-white truncate">{current.title}</p>
-            <p className="text-[11px] text-zinc-400 truncate">
-              {[current.artist, current.album].filter(Boolean).join(' · ')}
-            </p>
-          </div>
+          <button
+            onClick={() => setExpanded(true)}
+            className="flex items-center gap-3 min-w-0 w-36 sm:w-48 shrink-0 text-left"
+            title="Now playing"
+          >
+            {current.coverUrl ? (
+              <img src={current.coverUrl} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+            ) : (
+              <div className="w-10 h-10 rounded bg-zinc-800 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+            )}
+            <span className="min-w-0">
+              <p className="text-sm font-semibold text-white truncate">{current.title}</p>
+              <p className="text-[11px] text-zinc-400 truncate">
+                {[current.artist, current.album].filter(Boolean).join(' · ')}
+              </p>
+            </span>
+          </button>
           <button
             onClick={prev}
             disabled={!hasPrev}
@@ -136,11 +162,7 @@ function PlayerBar() {
             </svg>
           </button>
           <button
-            onClick={() => {
-              const a = audioRef.current;
-              if (!a) return;
-              if (a.paused) a.play(); else a.pause();
-            }}
+            onClick={togglePlay}
             className="shrink-0 w-8 h-8 rounded-full bg-white text-zinc-900 flex items-center justify-center active:scale-95 transition-transform"
             title={playing ? 'Pause' : 'Play'}
           >
@@ -162,7 +184,6 @@ function PlayerBar() {
           </button>
           <span className="hidden sm:block text-[11px] text-zinc-500 tabular-nums shrink-0 w-9 text-right">{fmtTime(time)}</span>
           <div
-            ref={barRef}
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seek(e); }}
             onPointerMove={(e) => { if (e.buttons === 1) seek(e); }}
             className="flex-1 min-w-0 h-4 flex items-center cursor-pointer touch-none"
@@ -175,12 +196,7 @@ function PlayerBar() {
           </div>
           <span className="hidden sm:block text-[11px] text-zinc-500 tabular-nums shrink-0 w-9">{fmtTime(duration)}</span>
           <button
-            onClick={() => {
-              const a = audioRef.current;
-              if (!a) return;
-              a.muted = !muted;
-              setMuted(!muted);
-            }}
+            onClick={toggleMute}
             className="hidden md:block shrink-0 text-zinc-400 active:text-white transition-colors"
             title={muted ? 'Unmute' : 'Mute'}
           >
@@ -196,13 +212,7 @@ function PlayerBar() {
             max={1}
             step={0.01}
             value={muted ? 0 : volume}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              const a = audioRef.current;
-              if (a) { a.volume = v; a.muted = false; }
-              setVolume(v);
-              setMuted(false);
-            }}
+            onChange={(e) => setVol(Number(e.target.value))}
             className="hidden md:block w-20 h-1 accent-emerald-400 shrink-0"
             aria-label="Volume"
           />
@@ -216,22 +226,189 @@ function PlayerBar() {
             </svg>
           </button>
         </div>
-        <audio
-          key={current.id}
-          ref={audioRef}
-          src={api.trackStreamUrl(current.id)}
-          autoPlay
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onLoadedMetadata={(e) => {
-            setDuration(e.currentTarget.duration);
-            e.currentTarget.volume = muted ? 0 : volume;
-            e.currentTarget.muted = muted;
-          }}
-          onEnded={hasNext ? next : undefined}
-          className="hidden"
-        />
       </div>
+      {expanded && (
+        <FullPlayer
+          current={current}
+          playing={playing}
+          time={time}
+          duration={duration}
+          frac={frac}
+          volume={volume}
+          muted={muted}
+          hasNext={hasNext}
+          hasPrev={hasPrev}
+          onSeek={seek}
+          onTogglePlay={togglePlay}
+          onToggleMute={toggleMute}
+          onVolume={setVol}
+          onNext={next}
+          onPrev={prev}
+          onCollapse={() => setExpanded(false)}
+        />
+      )}
+      <audio
+        key={current.id}
+        ref={audioRef}
+        src={api.trackStreamUrl(current.id)}
+        autoPlay
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onLoadedMetadata={(e) => {
+          setDuration(e.currentTarget.duration);
+          e.currentTarget.volume = muted ? 0 : volume;
+          e.currentTarget.muted = muted;
+        }}
+        onEnded={hasNext ? next : undefined}
+        className="hidden"
+      />
     </>
+  );
+}
+
+// FullPlayer is the expanded now-playing overlay — big art over a blurred
+// cover backdrop, same controls as the mini bar.
+function FullPlayer({
+  current, playing, time, duration, frac, volume, muted, hasNext, hasPrev,
+  onSeek, onTogglePlay, onToggleMute, onVolume, onNext, onPrev, onCollapse,
+}: {
+  current: PlayerTrack;
+  playing: boolean;
+  time: number;
+  duration: number;
+  frac: number;
+  volume: number;
+  muted: boolean;
+  hasNext: boolean;
+  hasPrev: boolean;
+  onSeek: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onTogglePlay: () => void;
+  onToggleMute: () => void;
+  onVolume: (v: number) => void;
+  onNext: () => void;
+  onPrev: () => void;
+  onCollapse: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] bg-zinc-950 flex flex-col">
+      {current.coverUrl && (
+        <div
+          className="absolute inset-0 bg-cover bg-center blur-3xl scale-125 opacity-30 pointer-events-none"
+          style={{ backgroundImage: `url(${current.coverUrl})` }}
+        />
+      )}
+      <div className="relative flex-1 flex flex-col px-6 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] max-w-md w-full mx-auto">
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={onCollapse}
+            className="p-2 -ml-2 text-zinc-400 active:text-white transition-colors"
+            title="Collapse player"
+          >
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <p className="text-[11px] uppercase tracking-widest text-zinc-500">Now playing</p>
+          <span className="w-10" />
+        </div>
+
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          {current.coverUrl ? (
+            <img
+              src={current.coverUrl}
+              alt=""
+              className="max-h-full max-w-full aspect-square object-cover rounded-2xl shadow-2xl shadow-black/60"
+            />
+          ) : (
+            <div className="w-full aspect-square rounded-2xl bg-zinc-800 flex items-center justify-center text-zinc-600 shadow-2xl shadow-black/60">
+              <svg className="w-24 h-24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 min-w-0 text-center">
+          <p className="text-xl font-bold text-white truncate">{current.title}</p>
+          <p className="text-sm text-zinc-400 truncate mt-1">
+            {[current.artist, current.album].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+
+        <div className="mt-4">
+          <div
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); onSeek(e); }}
+            onPointerMove={(e) => { if (e.buttons === 1) onSeek(e); }}
+            className="h-6 flex items-center cursor-pointer touch-none"
+          >
+            <div className="relative w-full h-1.5 bg-zinc-700 rounded-full">
+              <div className="absolute inset-y-0 left-0 bg-emerald-400 rounded-full" style={{ width: `${frac * 100}%` }}>
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3.5 h-3.5 bg-white rounded-full shadow" />
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-between text-[11px] text-zinc-500 tabular-nums mt-1">
+            <span>{fmtTime(time)}</span>
+            <span>{fmtTime(duration)}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-8 mt-2">
+          <button
+            onClick={onPrev}
+            disabled={!hasPrev}
+            className="text-zinc-300 disabled:opacity-20 active:text-white transition-colors"
+            title="Previous"
+          >
+            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 20 9 12l10-8v16Z" /><path d="M5 4v16" />
+            </svg>
+          </button>
+          <button
+            onClick={onTogglePlay}
+            className="w-16 h-16 rounded-full bg-white text-zinc-900 flex items-center justify-center active:scale-95 transition-transform"
+            title={playing ? 'Pause' : 'Play'}
+          >
+            {playing ? (
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+            ) : (
+              <svg className="w-7 h-7 ml-1" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            )}
+          </button>
+          <button
+            onClick={onNext}
+            disabled={!hasNext}
+            className="text-zinc-300 disabled:opacity-20 active:text-white transition-colors"
+            title="Next"
+          >
+            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m5 4 10 8-10 8V4Z" /><path d="M19 4v16" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 mt-4">
+          <button
+            onClick={onToggleMute}
+            className="text-zinc-400 active:text-white transition-colors"
+            title={muted ? 'Unmute' : 'Mute'}
+          >
+            {muted || volume === 0 ? (
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5Z" /><line x1="22" y1="9" x2="16" y2="15" /><line x1="16" y1="9" x2="22" y2="15" /></svg>
+            ) : (
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+            )}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={muted ? 0 : volume}
+            onChange={(e) => onVolume(Number(e.target.value))}
+            className="flex-1 h-1 accent-emerald-400"
+            aria-label="Volume"
+          />
+        </div>
+      </div>
+    </div>
   );
 }
