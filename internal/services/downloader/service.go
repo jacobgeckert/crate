@@ -343,6 +343,21 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 	if best == nil {
 		_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
 		reason := missReason(search.Responses, track, s.queries, cfg)
+
+		// Retry once with the album query — peers sharing whole-album folders
+		// answer "Artist Album" even when the track query finds nothing.
+		albumQuery := strings.TrimSpace(track.ArtistName + " " + track.AlbumTitle)
+		if track.AlbumTitle != "" && !strings.EqualFold(strings.TrimSpace(search.SearchText), albumQuery) {
+			if fb, ferr := s.slskd.StartSearch(ctx, albumQuery); ferr == nil {
+				slog.Info("downloader: no match on track query, retrying with album query",
+					"track_id", track.ID, "query", albumQuery)
+				s.logActivity("search_started", "track", track.ID,
+					fmt.Sprintf("No match — retrying with album search: %s", albumQuery))
+				errStr := "no match on track query (" + reason + "); retrying with album search"
+				return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusSearching, &fb.ID, &errStr)
+			}
+		}
+
 		slog.Info("downloader: search found no usable file", "track_id", track.ID,
 			"track", track.Title, "reason", reason)
 		s.logActivity("download_failed", "track", track.ID,

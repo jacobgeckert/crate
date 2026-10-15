@@ -1,10 +1,16 @@
 package downloader
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/slskd"
 )
@@ -1041,4 +1047,81 @@ func TestMissReason(t *testing.T) {
 			t.Errorf("got %q", got)
 		}
 	})
+}
+
+func TestCheckSearchFallsBackToAlbumQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v0/searches":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "search-2"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v0/searches/"):
+			id := strings.TrimPrefix(r.URL.Path, "/api/v0/searches/")
+			text := "Coletta Lemonade Soda" // search-1: the track query
+			if id == "search-2" {
+				text = "Coletta Mind & Time" // the album fallback query
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": id, "searchText": text, "isComplete": true, "responses": []any{},
+			})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	q := db.NewQueries(database)
+
+	artist := &models.Artist{Name: "Coletta", Provider: "test", ProviderID: "a1", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(artist); err != nil {
+		t.Fatal(err)
+	}
+	album := &models.Album{ArtistID: artist.ID, Title: "Mind & Time", Provider: "test", ProviderID: "al1", Status: models.AlbumStatusWatched}
+	if err := q.CreateAlbum(album); err != nil {
+		t.Fatal(err)
+	}
+	track := &models.Track{AlbumID: album.ID, Title: "Lemonade Soda", TrackNumber: 2, Status: models.TrackStatusWanted}
+	if err := q.CreateTrack(track); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.EnqueueDownload(track.ID); err != nil {
+		t.Fatal(err)
+	}
+	searching, err := q.ListDownloads("pending")
+	if err != nil || len(searching) != 1 {
+		t.Fatalf("pending downloads: %v %d", err, len(searching))
+	}
+	d := searching[0]
+	one := "search-1"
+	if err := q.UpdateDownloadStatus(d.ID, models.DownloadStatusSearching, &one, nil); err != nil {
+		t.Fatal(err)
+	}
+	d.SlskdSearchID = &one
+
+	s := NewService(q, slskd.NewClient(srv.URL, ""), nil, nil)
+
+	// Track query found nothing -> retry with the album query, still searching.
+	if err := s.checkSearch(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	got, err := q.ListDownloads("searching")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("searching downloads: %v %d", err, len(got))
+	}
+	if got[0].SlskdSearchID == nil || *got[0].SlskdSearchID != "search-2" {
+		t.Fatalf("expected fallback to album search 'search-2', got %+v", got[0].SlskdSearchID)
+	}
+
+	// Album query also empty -> real failure, no second fallback.
+	if err := s.checkSearch(context.Background(), got[0]); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := q.ListDownloads("failed")
+	if err != nil || len(failed) != 1 {
+		t.Fatalf("failed downloads: %v %d", err, len(failed))
+	}
 }
