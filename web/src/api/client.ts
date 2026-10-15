@@ -92,6 +92,8 @@ export const api = {
     request<ConcertsResponse>(`/concerts${refresh ? '?refresh=1' : ''}`),
   getDiscover: (refresh = false) =>
     request<DiscoverResponse>(`/discover${refresh ? '?refresh=1' : ''}`),
+  dismissDiscover: (key: string) =>
+    request<void>(`/discover/dismiss`, { method: 'POST', body: JSON.stringify({ key }) }),
   refreshArtists: (ids: number[]) =>
     request<{ queued: number; ids: number[] }>(`/artists/refresh`, { method: 'POST', body: JSON.stringify({ ids }) }),
   getSyncStatus: () => request<{ items: ArtistSyncStatus[] }>('/artists/sync'),
@@ -157,6 +159,8 @@ export const api = {
   trackStreamUrl: (id: number) => `${BASE}/tracks/${id}/stream`,
   getTrackLyrics: (id: number) =>
     request<{ synced: boolean; text: string }>(`/tracks/${id}/lyrics`),
+  fetchTrackLyrics: (id: number) =>
+    request<{ synced: boolean }>(`/tracks/${id}/lyrics`, { method: 'POST' }),
 
   refreshAlbum: (id: number) =>
     request<{ ok: boolean }>(`/albums/${id}/refresh`, { method: 'POST' }),

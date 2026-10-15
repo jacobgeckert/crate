@@ -3,7 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import type { Suggestion } from '../types/index';
+import type { Suggestion, DiscoverResponse } from '../types/index';
+
+// dismissKey mirrors the backend's DismissalKey — MBID when present, else a
+// normalized name (letters/digits kept, "the " stripped).
+function dismissKey(s: Suggestion): string {
+  if (s.mbid) return 'mbid:' + s.mbid.toLowerCase();
+  const n = s.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ').replace(/^the /, '');
+  return 'name:' + n;
+}
 
 export default function Discover() {
   const queryClient = useQueryClient();
@@ -86,6 +94,14 @@ export default function Discover() {
 
 function SuggestionRow({ suggestion: s }: { suggestion: Suggestion }) {
   const [expanded, setExpanded] = useState(false);
+  const queryClient = useQueryClient();
+  const dismiss = useMutation({
+    mutationFn: () => api.dismissDiscover(dismissKey(s)),
+    onSuccess: () => {
+      queryClient.setQueryData<DiscoverResponse>(['discover'], (old) =>
+        old ? { ...old, suggestions: (old.suggestions ?? []).filter((x) => dismissKey(x) !== dismissKey(s)) } : old);
+    },
+  });
   const to = s.mbid
     ? `/browse/artist/${s.mbid}?provider=musicbrainz`
     : `/search?q=${encodeURIComponent(s.name)}`;
@@ -117,6 +133,15 @@ function SuggestionRow({ suggestion: s }: { suggestion: Suggestion }) {
               : `${s.artists.slice(0, 3).join(', ')} +${s.artists.length - 3}`}
           </p>
         </div>
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss.mutate(); }}
+          title="Not interested"
+          className="p-1 text-zinc-600 hover:text-zinc-300 shrink-0 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+          </svg>
+        </button>
         <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="m9 18 6-6-6-6" />
         </svg>

@@ -368,7 +368,6 @@ export default function AlbumDetail() {
     artist: album?.artist_name,
     album: album?.title,
     coverUrl: album?.cover_url,
-    hasLyrics: t.has_lyrics,
   }), [album]);
 
   const playQueue = useMemo((): PlayerTrack[] => {

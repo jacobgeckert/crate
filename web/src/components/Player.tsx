@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 
 export interface PlayerTrack {
@@ -8,14 +8,16 @@ export interface PlayerTrack {
   artist?: string;
   album?: string;
   coverUrl?: string;
-  hasLyrics?: boolean;
 }
 
 interface PlayerState {
   current: PlayerTrack | null;
+  queue: PlayerTrack[];
+  index: number;
   hasNext: boolean;
   hasPrev: boolean;
   play: (track: PlayerTrack, queue?: PlayerTrack[]) => void;
+  playAt: (index: number) => void;
   next: () => void;
   prev: () => void;
   close: () => void;
@@ -93,16 +95,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const next = useCallback(() => setIndex((i) => Math.min(i + 1, queue.length - 1)), [queue.length]);
   const prev = useCallback(() => setIndex((i) => Math.max(i - 1, 0)), []);
+  const playAt = useCallback((i: number) => setIndex(Math.min(Math.max(i, 0), queue.length - 1)), [queue.length]);
   const close = useCallback(() => setQueue([]), []);
 
   const current = queue.length > 0 ? queue[Math.min(index, queue.length - 1)] : null;
 
   const state = useMemo<PlayerState>(() => ({
     current,
+    queue,
+    index,
     hasNext: index < queue.length - 1,
     hasPrev: index > 0,
-    play, next, prev, close,
-  }), [current, index, queue.length, play, next, prev, close]);
+    play, playAt, next, prev, close,
+  }), [current, queue, index, play, playAt, next, prev, close]);
 
   return (
     <PlayerContext.Provider value={state}>
@@ -118,7 +123,7 @@ function fmtTime(s: number): string {
 }
 
 function PlayerBar() {
-  const { current, hasNext, hasPrev, next, prev, close } = usePlayer();
+  const { current, queue, index, hasNext, hasPrev, next, prev, playAt, close } = usePlayer();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
@@ -154,6 +159,48 @@ function PlayerBar() {
     a.currentTime = frac * duration;
     setTime(a.currentTime);
   };
+
+  const seekTo = (t: number) => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.currentTime = t;
+    setTime(t);
+  };
+
+  // Media Session: OS now-playing metadata + hardware/lock-screen controls.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !current) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: current.title,
+      artist: current.artist ?? '',
+      album: current.album ?? '',
+      artwork: current.coverUrl ? [{ src: current.coverUrl }] : [],
+    });
+  }, [current]);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+    }
+  }, [playing]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    ms.setActionHandler('play', () => audioRef.current?.play());
+    ms.setActionHandler('pause', () => audioRef.current?.pause());
+    ms.setActionHandler('previoustrack', hasPrev ? prev : null);
+    ms.setActionHandler('nexttrack', hasNext ? next : null);
+    ms.setActionHandler('seekto', (d) => {
+      const a = audioRef.current;
+      if (a && d.seekTime != null) a.currentTime = d.seekTime;
+    });
+    return () => {
+      for (const h of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto'] as const) {
+        ms.setActionHandler(h, null);
+      }
+    };
+  }, [hasPrev, hasNext, prev, next]);
 
   const togglePlay = () => {
     const a = audioRef.current;
@@ -301,6 +348,8 @@ function PlayerBar() {
       {expanded && (
         <FullPlayer
           current={current}
+          queue={queue}
+          queueIndex={index}
           playing={playing}
           time={time}
           duration={duration}
@@ -310,11 +359,13 @@ function PlayerBar() {
           hasNext={hasNext}
           hasPrev={hasPrev}
           onSeek={seek}
+          onSeekTo={seekTo}
           onTogglePlay={togglePlay}
           onToggleMute={toggleMute}
           onVolume={setVol}
           onNext={next}
           onPrev={prev}
+          onPlayAt={playAt}
           onCollapse={() => setExpanded(false)}
         />
       )}
@@ -334,6 +385,16 @@ function PlayerBar() {
           lastSave.current = now;
           const a = e.currentTarget;
           writePersisted({ time: a.currentTime, playing: !a.paused });
+          if ('mediaSession' in navigator && isFinite(a.duration) && a.duration > 0 &&
+              typeof navigator.mediaSession.setPositionState === 'function') {
+            try {
+              navigator.mediaSession.setPositionState({
+                duration: a.duration,
+                position: Math.min(a.currentTime, a.duration),
+                playbackRate: 1,
+              });
+            } catch { /* older engines reject out-of-range positions */ }
+          }
         }}
         onLoadedMetadata={(e) => {
           const a = e.currentTarget;
@@ -363,11 +424,15 @@ function PlayerBar() {
 
 // FullPlayer is the expanded now-playing overlay — big art over a blurred
 // cover backdrop, same controls as the mini bar.
+type FullView = 'art' | 'lyrics' | 'queue';
+
 function FullPlayer({
-  current, playing, time, duration, frac, volume, muted, hasNext, hasPrev,
-  onSeek, onTogglePlay, onToggleMute, onVolume, onNext, onPrev, onCollapse,
+  current, queue, queueIndex, playing, time, duration, frac, volume, muted, hasNext, hasPrev,
+  onSeek, onSeekTo, onTogglePlay, onToggleMute, onVolume, onNext, onPrev, onPlayAt, onCollapse,
 }: {
   current: PlayerTrack;
+  queue: PlayerTrack[];
+  queueIndex: number;
   playing: boolean;
   time: number;
   duration: number;
@@ -377,14 +442,16 @@ function FullPlayer({
   hasNext: boolean;
   hasPrev: boolean;
   onSeek: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onSeekTo: (t: number) => void;
   onTogglePlay: () => void;
   onToggleMute: () => void;
   onVolume: (v: number) => void;
   onNext: () => void;
   onPrev: () => void;
+  onPlayAt: (i: number) => void;
   onCollapse: () => void;
 }) {
-  const [showLyrics, setShowLyrics] = useState(false);
+  const [view, setView] = useState<FullView>('art');
   return (
     <div className="fixed inset-0 z-[70] bg-zinc-950 flex flex-col">
       {current.coverUrl && (
@@ -405,24 +472,54 @@ function FullPlayer({
             </svg>
           </button>
           <p className="text-[11px] uppercase tracking-widest text-zinc-500">Now playing</p>
-          {current.hasLyrics ? (
+          <div className="flex items-center -mr-2">
             <button
-              onClick={() => setShowLyrics((v) => !v)}
-              className={`p-2 -mr-2 transition-colors ${showLyrics ? 'text-emerald-400' : 'text-zinc-400 active:text-white'}`}
-              title={showLyrics ? 'Hide lyrics' : 'Lyrics'}
+              onClick={() => setView((v) => (v === 'lyrics' ? 'art' : 'lyrics'))}
+              className={`p-2 transition-colors ${view === 'lyrics' ? 'text-emerald-400' : 'text-zinc-400 active:text-white'}`}
+              title={view === 'lyrics' ? 'Hide lyrics' : 'Lyrics'}
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v1a7 7 0 0 1-14 0v-1" /><line x1="12" y1="19" x2="12" y2="22" />
               </svg>
             </button>
-          ) : (
-            <span className="w-9" />
-          )}
+            <button
+              onClick={() => setView((v) => (v === 'queue' ? 'art' : 'queue'))}
+              className={`p-2 transition-colors ${view === 'queue' ? 'text-emerald-400' : 'text-zinc-400 active:text-white'}`}
+              title={view === 'queue' ? 'Hide queue' : 'Queue'}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15V6" /><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" /><path d="M12 12H3" /><path d="M16 6H3" /><path d="M12 18H3" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 relative flex items-center justify-center min-h-0">
-          {showLyrics ? (
-            <LyricsView trackId={current.id} time={time} />
+          {view === 'lyrics' ? (
+            <LyricsView trackId={current.id} time={time} onSeek={onSeekTo} />
+          ) : view === 'queue' ? (
+            <div className="absolute inset-0 overflow-y-auto -mx-2 px-2">
+              {queue.map((t, i) => (
+                <button
+                  key={`${t.id}-${i}`}
+                  onClick={() => onPlayAt(i)}
+                  className={`w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                    i === queueIndex ? 'bg-zinc-800/80 text-white' : 'text-zinc-400 hover:bg-zinc-800/50'
+                  }`}
+                >
+                  <span className="w-5 text-right text-[11px] tabular-nums text-zinc-600 shrink-0">{i + 1}</span>
+                  <span className="min-w-0 flex-1">
+                    <p className="text-sm truncate">{t.title}</p>
+                    {t.artist && <p className="text-[11px] text-zinc-500 truncate">{t.artist}</p>}
+                  </span>
+                  {i === queueIndex && (
+                    <svg className="w-4 h-4 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M4 14v6" /><path d="M9 8v12" /><path d="M14 4v16" /><path d="M19 10v10" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
           ) : current.coverUrl ? (
             <img
               src={current.coverUrl}
@@ -550,11 +647,18 @@ function parseLrc(text: string): LyricLine[] {
 }
 
 // LyricsView renders plain lyrics as static text; synced (.lrc) lyrics get
-// the active line highlighted and auto-scrolled to center.
-function LyricsView({ trackId, time }: { trackId: number; time: number }) {
+// the active line highlighted and auto-scrolled to center, and lines are
+// clickable to seek.
+function LyricsView({ trackId, time, onSeek }: { trackId: number; time: number; onSeek?: (t: number) => void }) {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['track-lyrics', trackId],
     queryFn: () => api.getTrackLyrics(trackId),
+    retry: false, // a 404 just means no sidecar — don't stall the empty state
+  });
+  const fetchLyrics = useMutation({
+    mutationFn: () => api.fetchTrackLyrics(trackId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['track-lyrics', trackId] }),
   });
 
   const lines = useMemo(() => (data?.synced ? parseLrc(data.text) : []), [data]);
@@ -583,8 +687,19 @@ function LyricsView({ trackId, time }: { trackId: number; time: number }) {
   }
   if (!data) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center">
-        <p className="text-sm text-zinc-500">No lyrics found for this track</p>
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+        <p className="text-sm text-zinc-500">
+          {fetchLyrics.isError ? 'No lyrics available for this track' : 'No lyrics found for this track'}
+        </p>
+        {!fetchLyrics.isError && (
+          <button
+            onClick={() => fetchLyrics.mutate()}
+            disabled={fetchLyrics.isPending}
+            className="text-xs px-3 py-1.5 rounded-full bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors disabled:opacity-50"
+          >
+            {fetchLyrics.isPending ? 'Fetching…' : 'Fetch lyrics'}
+          </button>
+        )}
       </div>
     );
   }
@@ -601,9 +716,10 @@ function LyricsView({ trackId, time }: { trackId: number; time: number }) {
         <p
           key={i}
           ref={i === activeIdx ? activeRef : undefined}
+          onClick={onSeek ? () => onSeek(l.t) : undefined}
           className={`py-1 transition-colors ${
             i === activeIdx ? 'text-white font-semibold text-base' : 'text-zinc-500 text-sm'
-          }`}
+          } ${onSeek ? 'cursor-pointer hover:text-zinc-300' : ''}`}
         >
           {l.text || '♪'}
         </p>
