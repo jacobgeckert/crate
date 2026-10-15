@@ -258,6 +258,15 @@ func (s *Service) similarArtists(ctx context.Context, apiKey, name string, refre
 	return similar, nil
 }
 
+// DismissalKey identifies a suggestion for dismissal persistence — the MBID
+// survives renames; the normalized name is the fallback for MBID-less results.
+func DismissalKey(s Suggestion) string {
+	if s.MBID != "" {
+		return "mbid:" + strings.ToLower(s.MBID)
+	}
+	return "name:" + normalizeName(s.Name)
+}
+
 // normalizeName mirrors the concerts matcher — letters/digits kept, the rest
 // whitespace, "the " prefix dropped — so library dedupe agrees with shows.
 func normalizeName(name string) string {

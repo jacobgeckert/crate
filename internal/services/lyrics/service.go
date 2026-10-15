@@ -77,6 +77,14 @@ func (s *Service) AlbumDownloaded(ctx context.Context, albumID int64) {
 	}
 }
 
+// FetchTrack pulls LRCLIB lyrics for a single owned track on demand — the
+// track must carry ArtistName/AlbumTitle (GetTrackWithMeta). Returns whether
+// a sidecar was written and whether it's synced.
+func (s *Service) FetchTrack(ctx context.Context, t *models.Track) (wrote, synced bool) {
+	res := s.fetchTrack(ctx, t, t.ArtistName, t.AlbumTitle)
+	return res == resultFetched || res == resultPlain, res == resultFetched
+}
+
 // FetchAlbum pulls synced lyrics for every owned track on the album.
 func (s *Service) FetchAlbum(ctx context.Context, album *models.Album) (*Report, error) {
 	artist, err := s.queries.GetArtist(album.ArtistID)

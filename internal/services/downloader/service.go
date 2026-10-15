@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -479,8 +480,21 @@ func (s *Service) DownloadAlbum(ctx context.Context, albumID int64) {
 		return
 	}
 
-	slog.Info("downloader: album sourced from one peer", "album", album.Title,
-		"username", bestUser, "tracks", len(files), "wanted", len(wanted))
+	// Cover tracks the winning share lacks from other responders — same
+	// guards; consolidation on one peer only wins when they have the file.
+	cfg.requireArtist = true
+	for _, tr := range wanted {
+		if _, ok := files[tr.ID]; ok {
+			continue
+		}
+		if cands := scoreCandidates(search.Responses, tr, s.queries, cfg); len(cands) > 0 {
+			files[tr.ID] = cands[0]
+		}
+	}
+
+	slog.Info("downloader: album search matched tracks", "album", album.Title,
+		"primary", bestUser, "tracks", len(files), "wanted", len(wanted))
+	failedUsers := map[string]bool{}
 	for _, tr := range wanted {
 		cand, ok := files[tr.ID]
 		if !ok {
@@ -488,13 +502,17 @@ func (s *Service) DownloadAlbum(ctx context.Context, albumID int64) {
 				"track", tr.Title, "reason", missReason(search.Responses, tr, s.queries, cfg))
 			continue
 		}
+		if failedUsers[cand.username] {
+			continue // peer's transfer starts are failing — per-track retry instead
+		}
 		dlID, err := s.queries.EnqueueDownloadReturningID(tr.ID)
 		if err != nil || dlID == 0 {
 			continue // already in flight — the normal pipeline owns it
 		}
-		if err := s.beginTransfer(ctx, dlID, tr, bestUser, cand.file); err != nil {
-			s.queries.CooldownUser(bestUser, "download failed: "+err.Error(), s.getCooldownDuration())
-			slog.Info("downloader: album transfer start failed, shadow banning user", "username", bestUser, "error", err)
+		if err := s.beginTransfer(ctx, dlID, tr, cand.username, cand.file); err != nil {
+			failedUsers[cand.username] = true
+			_ = s.queries.CooldownUser(cand.username, "download failed: "+err.Error(), s.getCooldownDuration())
+			slog.Info("downloader: album transfer start failed, shadow banning user", "username", cand.username, "error", err)
 			continue // the pending queue row retries through the per-track path
 		}
 	}
@@ -909,11 +927,26 @@ func formatCandidates(candidates []candidate, q *db.Queries, negativeKeywords []
 	return results
 }
 
+// ErrInFlight means the track already has a queue row — a manual download
+// started anyway would be untracked by checkDownload, so callers get a
+// conflict instead of an orphaned transfer.
+var ErrInFlight = errors.New("track already has a download in progress")
+
 // ManualDownload starts a download of a specific file from a specific user.
 func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, filename string, size int64, bitrate int) error {
 	track, err := s.queries.GetTrackWithMeta(trackID)
 	if err != nil {
 		return err
+	}
+
+	// Claim the queue row before touching slskd — starting a transfer while a
+	// row is already in flight would orphan it (nothing polls it).
+	dlID, err := s.queries.EnqueueDownloadReturningID(trackID)
+	if err != nil {
+		return err
+	}
+	if dlID == 0 {
+		return ErrInFlight
 	}
 
 	_ = s.queries.UpdateTrackDownloadedFrom(trackID, username)
@@ -926,12 +959,8 @@ func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, f
 
 	transfer, err := s.slskd.StartDownload(ctx, username, filename, size)
 	if err != nil {
+		_ = s.queries.DeleteDownload(dlID) // nothing in flight — release the row for retry
 		return fmt.Errorf("start download: %w", err)
-	}
-
-	dlID, err := s.queries.EnqueueDownloadReturningID(trackID)
-	if err != nil {
-		return err
 	}
 
 	transferKey := username + "|" + transfer.ID

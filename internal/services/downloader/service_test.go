@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -1123,5 +1124,48 @@ func TestCheckSearchFallsBackToAlbumQuery(t *testing.T) {
 	failed, err := q.ListDownloads("failed")
 	if err != nil || len(failed) != 1 {
 		t.Fatalf("failed downloads: %v %d", err, len(failed))
+	}
+}
+
+func TestManualDownloadConflictDoesNotStartTransfer(t *testing.T) {
+	started := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/downloads") {
+			started++
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "t-1"})
+	}))
+	t.Cleanup(srv.Close)
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	q := db.NewQueries(database)
+
+	artist := &models.Artist{Name: "A", Provider: "test", ProviderID: "a1", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(artist); err != nil {
+		t.Fatal(err)
+	}
+	album := &models.Album{ArtistID: artist.ID, Title: "B", Provider: "test", ProviderID: "al1", Status: models.AlbumStatusWatched}
+	if err := q.CreateAlbum(album); err != nil {
+		t.Fatal(err)
+	}
+	track := &models.Track{AlbumID: album.ID, Title: "T", TrackNumber: 1, Status: models.TrackStatusWanted}
+	if err := q.CreateTrack(track); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.EnqueueDownload(track.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewService(q, slskd.NewClient(srv.URL, ""), nil, nil)
+	err = s.ManualDownload(context.Background(), track.ID, "user", "file.flac", 100, 0)
+	if !errors.Is(err, ErrInFlight) {
+		t.Fatalf("want ErrInFlight, got %v", err)
+	}
+	if started != 0 {
+		t.Error("slskd transfer started despite in-flight queue row — it would be orphaned")
 	}
 }

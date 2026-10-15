@@ -32,8 +32,34 @@ func (s *Server) handleGetDiscover(w http.ResponseWriter, r *http.Request) {
 	if suggestions == nil {
 		suggestions = []discover.Suggestion{}
 	}
+	if dismissed, derr := s.queries.ListDiscoverDismissals(); derr == nil && len(dismissed) > 0 {
+		kept := suggestions[:0]
+		for _, sg := range suggestions {
+			if !dismissed[discover.DismissalKey(sg)] {
+				kept = append(kept, sg)
+			}
+		}
+		suggestions = kept
+	}
 	s.enrichSuggestionImages(r.Context(), suggestions, refresh)
 	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "suggestions": suggestions})
+}
+
+// handleDismissDiscover records a suggestion the user doesn't want to see —
+// it stays dismissed across refreshes (no un-dismiss UI for now).
+func (s *Server) handleDismissDiscover(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
+		writeError(w, http.StatusBadRequest, "key required")
+		return
+	}
+	if err := s.queries.DismissDiscoverSuggestion(req.Key); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // enrichSuggestionImages fills ImageURL on each suggestion by looking the name

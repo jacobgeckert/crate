@@ -157,6 +157,7 @@ func (s *Server) setupRouter() chi.Router {
 		r.Get("/releases/upcoming", s.handleUpcomingReleases)
 		r.Get("/concerts", s.handleGetConcerts)
 		r.Get("/discover", s.handleGetDiscover)
+		r.Post("/discover/dismiss", s.handleDismissDiscover)
 
 		r.Route("/images", func(r chi.Router) {
 			r.Get("/{name}", s.handleServeImage)
@@ -192,6 +193,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Post("/{id}/reject", s.handleRejectTrack)
 			r.Get("/{id}/stream", s.handleStreamTrack)
 			r.Get("/{id}/lyrics", s.handleGetTrackLyrics)
+			r.Post("/{id}/lyrics", s.handleFetchTrackLyrics)
 			r.Put("/{id}/ignore", s.handleIgnoreTrack)
 			r.Delete("/{id}/ignore", s.handleUnignoreTrack)
 		})

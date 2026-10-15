@@ -21,6 +21,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/naming"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
 )
@@ -1322,6 +1323,10 @@ func (s *Server) handleManualDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.downloader.ManualDownload(r.Context(), id, req.Username, req.Filename, req.Size, req.BitRate); err != nil {
+		if errors.Is(err, downloader.ErrInFlight) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "download failed: "+err.Error())
 		return
 	}
@@ -1402,6 +1407,31 @@ func (s *Server) handleGetTrackLyrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"synced": synced, "text": text})
+}
+
+// handleFetchTrackLyrics pulls LRCLIB lyrics for one track on demand —
+// mirrors the album-level fetch but scoped to a single sidecar write.
+func (s *Server) handleFetchTrackLyrics(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	track, err := s.queries.GetTrackWithMeta(id)
+	if err != nil || track == nil {
+		writeError(w, http.StatusNotFound, "track not found")
+		return
+	}
+	if s.lyrics == nil {
+		writeError(w, http.StatusNotFound, "lyrics unavailable")
+		return
+	}
+	wrote, synced := s.lyrics.FetchTrack(r.Context(), track)
+	if !wrote {
+		writeError(w, http.StatusNotFound, "no lyrics found for this track")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"synced": synced})
 }
 
 // handleStreamTrack serves the track's audio file with Range support so the

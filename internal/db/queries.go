@@ -1401,3 +1401,28 @@ func (q *Queries) AllSettings() (map[string]string, error) {
 	}
 	return settings, rows.Err()
 }
+
+// Discover dismissals
+
+func (q *Queries) DismissDiscoverSuggestion(key string) error {
+	_, err := q.db.Exec(
+		`INSERT OR IGNORE INTO discover_dismissals (key) VALUES (?)`, key)
+	return err
+}
+
+func (q *Queries) ListDiscoverDismissals() (map[string]bool, error) {
+	rows, err := q.db.Query(`SELECT key FROM discover_dismissals`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
+}
