@@ -29,9 +29,60 @@ export function usePlayer(): PlayerState {
   return ctx;
 }
 
+const STORAGE_KEY = 'crate:player';
+
+interface PersistedPlayer {
+  queue: PlayerTrack[];
+  index: number;
+  time: number;
+  playing: boolean;
+  volume: number;
+  muted: boolean;
+}
+
+// loadPersisted returns the player snapshot saved across page loads, so a
+// refresh can resume the queue where it left off.
+function loadPersisted(): PersistedPlayer | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as PersistedPlayer;
+    if (!Array.isArray(p.queue) || p.queue.length === 0) return null;
+    return { ...p, index: Math.min(Math.max(p.index || 0, 0), p.queue.length - 1) };
+  } catch {
+    return null;
+  }
+}
+
+// writePersisted merges fields into the stored snapshot — the provider owns
+// queue/index, the bar owns position/volume/playing.
+function writePersisted(patch: Partial<PersistedPlayer>) {
+  const p = loadPersisted();
+  if (!p) return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...p, ...patch }));
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  const [queue, setQueue] = useState<PlayerTrack[]>([]);
-  const [index, setIndex] = useState(0);
+  const [queue, setQueue] = useState<PlayerTrack[]>(() => loadPersisted()?.queue ?? []);
+  const [index, setIndex] = useState(() => loadPersisted()?.index ?? 0);
+
+  // Keep the snapshot's queue/index current. A track change resets the saved
+  // position; a same-track write (e.g. the mount that restored state) keeps it.
+  useEffect(() => {
+    if (queue.length === 0) {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+    const prev = loadPersisted();
+    const cur = queue[Math.min(index, queue.length - 1)];
+    const sameTrack = prev?.queue[prev.index]?.id === cur?.id;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      volume: 1, muted: false, time: 0, playing: true,
+      ...prev,
+      queue, index,
+      ...(sameTrack ? {} : { time: 0, playing: true }),
+    }));
+  }, [queue, index]);
 
   const play = useCallback((track: PlayerTrack, q?: PlayerTrack[]) => {
     const list = q && q.length > 0 ? q : [track];
@@ -72,10 +123,12 @@ function PlayerBar() {
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(() => loadPersisted()?.volume ?? 1);
+  const [muted, setMuted] = useState(() => loadPersisted()?.muted ?? false);
   const [expanded, setExpanded] = useState(false);
   const raf = useRef(0);
+  const restored = useRef(false);
+  const lastSave = useRef(0);
 
   // rAF-driven progress — the audio element's timeupdate only fires ~4Hz,
   // which makes a native-style bar visibly step. This interpolates smoothly.
@@ -113,6 +166,7 @@ function PlayerBar() {
     if (!a) return;
     a.muted = !muted;
     setMuted(!muted);
+    writePersisted({ muted: !muted });
   };
 
   const setVol = (v: number) => {
@@ -120,7 +174,19 @@ function PlayerBar() {
     if (a) { a.volume = v; a.muted = false; }
     setVolume(v);
     setMuted(false);
+    writePersisted({ volume: v, muted: false });
   };
+
+  // Snapshot the position on unload so a refresh resumes in place, and save
+  // periodically via onTimeUpdate as a fallback.
+  useEffect(() => {
+    const save = () => {
+      const a = audioRef.current;
+      if (a) writePersisted({ time: a.currentTime, playing: !a.paused, volume, muted });
+    };
+    window.addEventListener('pagehide', save);
+    return () => window.removeEventListener('pagehide', save);
+  }, [volume, muted]);
 
   if (!current) return null;
 
@@ -257,12 +323,36 @@ function PlayerBar() {
         ref={audioRef}
         src={api.trackStreamUrl(current.id)}
         autoPlay
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
+        onPlay={() => { setPlaying(true); writePersisted({ playing: true }); }}
+        onPause={() => {
+          setPlaying(false);
+          writePersisted({ playing: false, time: audioRef.current?.currentTime ?? 0 });
+        }}
+        onTimeUpdate={(e) => {
+          const now = Date.now();
+          if (now - lastSave.current < 1500) return;
+          lastSave.current = now;
+          const a = e.currentTarget;
+          writePersisted({ time: a.currentTime, playing: !a.paused });
+        }}
         onLoadedMetadata={(e) => {
-          setDuration(e.currentTarget.duration);
-          e.currentTarget.volume = muted ? 0 : volume;
-          e.currentTarget.muted = muted;
+          const a = e.currentTarget;
+          setDuration(a.duration);
+          // On the first track after a page load, resume position/playing/volume
+          // from the snapshot — subsequent tracks start fresh.
+          if (!restored.current) {
+            restored.current = true;
+            const p = loadPersisted();
+            if (p && p.queue[p.index]?.id === current.id) {
+              if (p.time > 0 && p.time < a.duration) a.currentTime = p.time;
+              a.volume = p.muted ? 0 : p.volume;
+              a.muted = p.muted;
+              if (!p.playing) a.pause();
+              return;
+            }
+          }
+          a.volume = muted ? 0 : volume;
+          a.muted = muted;
         }}
         onEnded={hasNext ? next : undefined}
         className="hidden"
