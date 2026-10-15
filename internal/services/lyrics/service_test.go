@@ -52,10 +52,10 @@ func addTrack(t *testing.T, q *db.Queries, albumID int64, title, relPath string,
 	t.Helper()
 	fp := relPath
 	tr := &models.Track{
-		AlbumID:   albumID,
-		Title:     title,
+		AlbumID:    albumID,
+		Title:      title,
 		DurationMs: 201000,
-		Provider:  "test", ProviderID: "tr-" + title,
+		Provider:   "test", ProviderID: "tr-" + title,
 		Status:   status,
 		FilePath: &fp,
 	}
@@ -273,5 +273,53 @@ func TestFetchAlbumPlainUpgradesToSynced(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(libDir, "Test Artist/Test Album/01 - Song.txt")); !os.IsNotExist(err) {
 		t.Fatal("stale .txt not swept after synced upgrade")
+	}
+}
+
+func TestTrackLyrics(t *testing.T) {
+	s, q, libDir := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	album := seed(t, q)
+
+	syncedRel := "Test Artist/Test Album/01 - Synced.flac"
+	writeFile(t, filepath.Join(libDir, syncedRel))
+	writeFile(t, filepath.Join(libDir, "Test Artist/Test Album/01 - Synced.lrc"))
+	writeFile(t, filepath.Join(libDir, "Test Artist/Test Album/01 - Synced.txt"))
+	addTrack(t, q, album.ID, "Synced", syncedRel, models.TrackStatusOwned)
+
+	plainRel := "Test Artist/Test Album/02 - Plain.flac"
+	writeFile(t, filepath.Join(libDir, plainRel))
+	writeFile(t, filepath.Join(libDir, "Test Artist/Test Album/02 - Plain.txt"))
+	addTrack(t, q, album.ID, "Plain", plainRel, models.TrackStatusOwned)
+
+	bareRel := "Test Artist/Test Album/03 - Bare.flac"
+	writeFile(t, filepath.Join(libDir, bareRel))
+	addTrack(t, q, album.ID, "Bare", bareRel, models.TrackStatusOwned)
+
+	outside := filepath.Join(t.TempDir(), "outside.flac")
+	writeFile(t, outside)
+	writeFile(t, strings.TrimSuffix(outside, ".flac")+".lrc")
+	addTrack(t, q, album.ID, "Outside", outside, models.TrackStatusOwned)
+
+	tracks, _ := q.ListTracksByAlbum(album.ID)
+	byTitle := map[string]*models.Track{}
+	for i := range tracks {
+		byTitle[tracks[i].Title] = &tracks[i]
+	}
+
+	_, synced, ok := s.TrackLyrics(byTitle["Synced"])
+	if !ok || !synced {
+		t.Errorf("Synced: got synced=%v ok=%v", synced, ok)
+	}
+	_, synced, ok = s.TrackLyrics(byTitle["Plain"])
+	if !ok || synced {
+		t.Errorf("Plain: got synced=%v ok=%v, want plain text", synced, ok)
+	}
+	if _, _, ok := s.TrackLyrics(byTitle["Bare"]); ok {
+		t.Error("Bare: expected no lyrics")
+	}
+	if _, _, ok := s.TrackLyrics(byTitle["Outside"]); ok {
+		t.Error("Outside: sidecars outside the library must not be read")
 	}
 }

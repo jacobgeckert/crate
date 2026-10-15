@@ -122,6 +122,26 @@ func (s *Service) MarkTracks(tracks []models.Track) {
 	}
 }
 
+// TrackLyrics reads a track's lyrics sidecar — synced .lrc preferred over the
+// plain-text .txt fallback. ok=false when no sidecar exists.
+func (s *Service) TrackLyrics(t *models.Track) (text string, synced bool, ok bool) {
+	if t.FilePath == nil || *t.FilePath == "" {
+		return "", false, false
+	}
+	abs := library.ResolvePath(s.libraryDir, *t.FilePath)
+	if !library.Contains(s.libraryDir, abs) {
+		return "", false, false
+	}
+	base := strings.TrimSuffix(abs, filepath.Ext(abs))
+	if data, err := os.ReadFile(base + ".lrc"); err == nil { // #nosec G304 -- path resolved inside the library dir above
+		return string(data), true, true
+	}
+	if data, err := os.ReadFile(base + ".txt"); err == nil { // #nosec G304 -- same
+		return string(data), false, true
+	}
+	return "", false, false
+}
+
 func (s *Service) hasSidecar(t *models.Track) bool {
 	if t.FilePath == nil || *t.FilePath == "" {
 		return false

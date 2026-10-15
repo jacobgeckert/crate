@@ -1379,6 +1379,31 @@ var streamableExts = map[string]string{
 	".aiff": "audio/aiff",
 }
 
+// handleGetTrackLyrics serves a track's lyrics sidecar — synced .lrc text
+// preferred over the plain .txt fallback — for the player's lyrics view.
+func (s *Server) handleGetTrackLyrics(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	track, err := s.queries.GetTrack(id)
+	if err != nil || track == nil {
+		writeError(w, http.StatusNotFound, "track not found")
+		return
+	}
+	if s.lyrics == nil {
+		writeError(w, http.StatusNotFound, "lyrics unavailable")
+		return
+	}
+	text, synced, ok := s.lyrics.TrackLyrics(track)
+	if !ok {
+		writeError(w, http.StatusNotFound, "no lyrics for this track")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"synced": synced, "text": text})
+}
+
 // handleStreamTrack serves the track's audio file with Range support so the
 // web player can seek. Imported files outside the library are streamable too —
 // reads don't carry the destructive-op containment requirement.

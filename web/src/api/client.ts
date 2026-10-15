@@ -155,6 +155,8 @@ export const api = {
   unwatchTrack: (id: number, deleteFile = false) =>
     request<void>(`/tracks/${id}${deleteFile ? '?delete=true' : ''}`, { method: 'DELETE' }),
   trackStreamUrl: (id: number) => `${BASE}/tracks/${id}/stream`,
+  getTrackLyrics: (id: number) =>
+    request<{ synced: boolean; text: string }>(`/tracks/${id}/lyrics`),
 
   refreshAlbum: (id: number) =>
     request<{ ok: boolean }>(`/albums/${id}/refresh`, { method: 'POST' }),

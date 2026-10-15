@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 
 export interface PlayerTrack {
@@ -7,6 +8,7 @@ export interface PlayerTrack {
   artist?: string;
   album?: string;
   coverUrl?: string;
+  hasLyrics?: boolean;
 }
 
 interface PlayerState {
@@ -132,8 +134,8 @@ function PlayerBar() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setExpanded(true)}
-            className="flex items-center gap-3 min-w-0 w-36 sm:w-48 shrink-0 text-left"
-            title="Now playing"
+            className="flex items-center gap-3 min-w-0 w-40 sm:w-56 shrink-0 text-left rounded-lg px-1.5 -ml-1.5 py-1 cursor-pointer hover:bg-zinc-800/70 transition-colors"
+            title="Expand player"
           >
             {current.coverUrl ? (
               <img src={current.coverUrl} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
@@ -144,12 +146,15 @@ function PlayerBar() {
                 </svg>
               </div>
             )}
-            <span className="min-w-0">
+            <span className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-white truncate">{current.title}</p>
               <p className="text-[11px] text-zinc-400 truncate">
                 {[current.artist, current.album].filter(Boolean).join(' · ')}
               </p>
             </span>
+            <svg className="w-4 h-4 text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m18 15-6-6-6 6" />
+            </svg>
           </button>
           <button
             onClick={prev}
@@ -289,6 +294,7 @@ function FullPlayer({
   onPrev: () => void;
   onCollapse: () => void;
 }) {
+  const [showLyrics, setShowLyrics] = useState(false);
   return (
     <div className="fixed inset-0 z-[70] bg-zinc-950 flex flex-col">
       {current.coverUrl && (
@@ -309,11 +315,25 @@ function FullPlayer({
             </svg>
           </button>
           <p className="text-[11px] uppercase tracking-widest text-zinc-500">Now playing</p>
-          <span className="w-10" />
+          {current.hasLyrics ? (
+            <button
+              onClick={() => setShowLyrics((v) => !v)}
+              className={`p-2 -mr-2 transition-colors ${showLyrics ? 'text-emerald-400' : 'text-zinc-400 active:text-white'}`}
+              title={showLyrics ? 'Hide lyrics' : 'Lyrics'}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v1a7 7 0 0 1-14 0v-1" /><line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </button>
+          ) : (
+            <span className="w-9" />
+          )}
         </div>
 
         <div className="flex-1 flex items-center justify-center min-h-0">
-          {current.coverUrl ? (
+          {showLyrics ? (
+            <LyricsView trackId={current.id} time={time} />
+          ) : current.coverUrl ? (
             <img
               src={current.coverUrl}
               alt=""
@@ -409,6 +429,83 @@ function FullPlayer({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+interface LyricLine {
+  t: number;
+  text: string;
+}
+
+const lrcTimeRe = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+
+// parseLrc flattens [mm:ss.xx] tags into timed lines; lines with multiple
+// tags emit one entry per timestamp.
+function parseLrc(text: string): LyricLine[] {
+  const out: LyricLine[] = [];
+  for (const raw of text.split('\n')) {
+    const times: number[] = [];
+    lrcTimeRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let consumed = 0;
+    while ((m = lrcTimeRe.exec(raw)) !== null) {
+      times.push(Number(m[1]) * 60 + parseFloat(m[2]));
+      consumed = lrcTimeRe.lastIndex;
+    }
+    const text = raw.slice(consumed).trim();
+    for (const t of times) out.push({ t, text });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+// LyricsView renders plain lyrics as static text; synced (.lrc) lyrics get
+// the active line highlighted and auto-scrolled to center.
+function LyricsView({ trackId, time }: { trackId: number; time: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['track-lyrics', trackId],
+    queryFn: () => api.getTrackLyrics(trackId),
+  });
+
+  const lines = useMemo(() => (data?.synced ? parseLrc(data.text) : []), [data]);
+  const activeIdx = useMemo(() => {
+    let idx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].t <= time) idx = i; else break;
+    }
+    return idx;
+  }, [lines, time]);
+  const activeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [activeIdx]);
+
+  if (isLoading) {
+    return <div className="w-8 h-8 rounded-full border-2 border-zinc-600 border-t-emerald-400 animate-spin" />;
+  }
+  if (!data) {
+    return <p className="text-sm text-zinc-500">No lyrics found for this track</p>;
+  }
+  if (!data.synced) {
+    return (
+      <div className="h-full w-full overflow-y-auto">
+        <p className="whitespace-pre-wrap text-sm text-zinc-300 text-center leading-relaxed py-4">{data.text}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="h-full w-full overflow-y-auto py-[40%] text-center">
+      {lines.map((l, i) => (
+        <p
+          key={i}
+          ref={i === activeIdx ? activeRef : undefined}
+          className={`py-1 transition-colors ${
+            i === activeIdx ? 'text-white font-semibold text-base' : 'text-zinc-500 text-sm'
+          }`}
+        >
+          {l.text || '♪'}
+        </p>
+      ))}
     </div>
   );
 }

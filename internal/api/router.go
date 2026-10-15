@@ -191,6 +191,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Post("/{id}/download", s.handleManualDownload)
 			r.Post("/{id}/reject", s.handleRejectTrack)
 			r.Get("/{id}/stream", s.handleStreamTrack)
+			r.Get("/{id}/lyrics", s.handleGetTrackLyrics)
 			r.Put("/{id}/ignore", s.handleIgnoreTrack)
 			r.Delete("/{id}/ignore", s.handleUnignoreTrack)
 		})
