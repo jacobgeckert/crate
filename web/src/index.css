@@ -46,3 +46,17 @@
 .animate-slide-up {
   animation: slide-up 0.25s ease-out;
 }
+
+/* Playing-track equalizer bars (track row indicator) */
+@keyframes eq-bar {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+
+.eq-bar {
+  animation: eq-bar 0.9s ease-in-out infinite;
+  animation-fill-mode: both; /* bars rest flat during per-bar delay, not at full height */
+  transform-origin: bottom;
+}
+
+

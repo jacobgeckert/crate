@@ -675,6 +675,7 @@ export default function AlbumDetail() {
               const isManualOpen = manualSearchTrackId === track.id;
               const isLocalUnmatched = track.provider === 'local' && album.provider !== 'local';
               const isLinkOpen = linkTrackId === track.id;
+              const isCurrentTrack = player.current?.id === track.id;
               const showDiscHeader = multiDisc && (idx === 0 || filteredTracks[idx - 1].disc_number !== track.disc_number);
               return (
                 <div key={track.id}>
@@ -684,10 +685,17 @@ export default function AlbumDetail() {
                     </p>
                   )}
                   <div
-                    className={`flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer hover:bg-zinc-800/40 active:bg-zinc-800/50 transition-colors ${
+                    className={`group relative flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer transition-all duration-150 hover:bg-zinc-800/60 hover:scale-[1.01] hover:shadow-md hover:shadow-black/40 hover:z-10 active:bg-zinc-800/50 ${
                       splitMode && splitSel.has(track.id) ? 'bg-blue-900/20' : ''
                     }`}
-                    onClick={() => (splitMode ? toggleSplitSel(track.id) : setSelectedTrack(track))}
+                    onClick={() => {
+                      if (splitMode) { toggleSplitSel(track.id); return; }
+                      if (track.status === 'owned' && track.file_path) {
+                        player.play(toPlayerTrack(track), playQueue);
+                      } else {
+                        setSelectedTrack(track);
+                      }
+                    }}
                   >
                     {splitMode ? (
                       <input
@@ -697,6 +705,32 @@ export default function AlbumDetail() {
                         onClick={(e) => e.stopPropagation()}
                         className="w-4 h-4 shrink-0 accent-blue-500"
                       />
+                    ) : track.status === 'owned' && track.file_path ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); player.play(toPlayerTrack(track), playQueue); }}
+                        className="w-5 h-4 shrink-0 flex items-center justify-end"
+                        title={isCurrentTrack ? 'Playing' : 'Play'}
+                      >
+                        {/* The wrapper flattens on pause — children keep animating, so the
+                            transition runs on a non-animated property and actually eases. */}
+                        {isCurrentTrack ? (
+                          <span
+                            className="flex items-end gap-[2px] h-3 origin-bottom transition-transform duration-200"
+                            style={{ transform: player.playing ? 'scaleY(1)' : 'scaleY(0.15)' }}
+                          >
+                            {[0, 0.15, 0.3].map((d) => (
+                              <span key={d} className="eq-bar w-[3px] h-full bg-emerald-400 rounded-sm" style={{ animationDelay: `${d}s` }} />
+                            ))}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-[11px] text-zinc-600 tabular-nums group-hover:hidden">{track.track_number}</span>
+                            <svg className="hidden group-hover:block w-3 h-3 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="m6 4 14 8-14 8V4Z" />
+                            </svg>
+                          </>
+                        )}
+                      </button>
                     ) : (
                       <span className="text-[11px] text-zinc-600 w-5 text-right shrink-0 tabular-nums">
                         {track.track_number}
@@ -727,17 +761,6 @@ export default function AlbumDetail() {
                         </p>
                       )}
                     </div>
-                    {track.status === 'owned' && track.file_path && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); player.play(toPlayerTrack(track), playQueue); }}
-                        className={`shrink-0 transition-colors ${player.current?.id === track.id ? 'text-emerald-400' : 'text-zinc-500 active:text-white'}`}
-                        title="Play"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m6 4 14 8-14 8V4Z" />
-                        </svg>
-                      </button>
-                    )}
                     {track.status === 'owned' && isLocalUnmatched && (
                       <>
                         <button
@@ -819,13 +842,22 @@ export default function AlbumDetail() {
                       </button>
                     )}
                     <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedTrack(track); }}
+                      className="ml-1 text-zinc-500 active:text-white transition-colors shrink-0"
+                      title="Track details"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />
+                      </svg>
+                    </button>
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         if (confirm(`Delete "${track.title}"? ${track.status === 'owned' ? 'The file will be removed from your library and the track marked ignored.' : 'The track will be marked ignored.'}`)) {
                           unwatchTrack.mutate({ trackId: track.id, deleteFile: true });
                         }
                       }}
-                      className="ml-1 text-zinc-600 active:text-red-400 transition-colors shrink-0"
+                      className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
                       title="Delete track file"
                     >
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

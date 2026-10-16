@@ -14,6 +14,7 @@ interface PlayerState {
   current: PlayerTrack | null;
   queue: PlayerTrack[];
   index: number;
+  playing: boolean;
   hasNext: boolean;
   hasPrev: boolean;
   play: (track: PlayerTrack, queue?: PlayerTrack[]) => void;
@@ -67,6 +68,7 @@ function writePersisted(patch: Partial<PersistedPlayer>) {
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<PlayerTrack[]>(() => loadPersisted()?.queue ?? []);
   const [index, setIndex] = useState(() => loadPersisted()?.index ?? 0);
+  const [playing, setPlaying] = useState(false);
 
   // Keep the snapshot's queue/index current. A track change resets the saved
   // position; a same-track write (e.g. the mount that restored state) keeps it.
@@ -104,15 +106,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     current,
     queue,
     index,
+    playing,
     hasNext: index < queue.length - 1,
     hasPrev: index > 0,
     play, playAt, next, prev, close,
-  }), [current, queue, index, play, playAt, next, prev, close]);
+  }), [current, queue, index, playing, play, playAt, next, prev, close]);
 
   return (
     <PlayerContext.Provider value={state}>
       {children}
-      <PlayerBar />
+      <PlayerBar setPlaying={setPlaying} />
     </PlayerContext.Provider>
   );
 }
@@ -122,10 +125,9 @@ function fmtTime(s: number): string {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-function PlayerBar() {
-  const { current, queue, index, hasNext, hasPrev, next, prev, playAt, close } = usePlayer();
+function PlayerBar({ setPlaying }: { setPlaying: (p: boolean) => void }) {
+  const { current, queue, index, playing, hasNext, hasPrev, next, prev, playAt, close } = usePlayer();
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(() => loadPersisted()?.volume ?? 1);
