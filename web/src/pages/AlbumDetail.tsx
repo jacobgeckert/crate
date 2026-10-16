@@ -684,7 +684,7 @@ export default function AlbumDetail() {
                     </p>
                   )}
                   <div
-                    className={`flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer active:bg-zinc-800/50 transition-colors ${
+                    className={`flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer hover:bg-zinc-800/40 active:bg-zinc-800/50 transition-colors ${
                       splitMode && splitSel.has(track.id) ? 'bg-blue-900/20' : ''
                     }`}
                     onClick={() => (splitMode ? toggleSplitSel(track.id) : setSelectedTrack(track))}
