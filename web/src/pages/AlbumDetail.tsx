@@ -691,7 +691,8 @@ export default function AlbumDetail() {
                     onClick={() => {
                       if (splitMode) { toggleSplitSel(track.id); return; }
                       if (track.status === 'owned' && track.file_path) {
-                        player.play(toPlayerTrack(track), playQueue);
+                        if (isCurrentTrack) player.toggle();
+                        else player.play(toPlayerTrack(track), playQueue);
                       } else {
                         setSelectedTrack(track);
                       }
@@ -707,9 +708,9 @@ export default function AlbumDetail() {
                       />
                     ) : track.status === 'owned' && track.file_path ? (
                       <button
-                        onClick={(e) => { e.stopPropagation(); player.play(toPlayerTrack(track), playQueue); }}
+                        onClick={(e) => { e.stopPropagation(); if (isCurrentTrack) player.toggle(); else player.play(toPlayerTrack(track), playQueue); }}
                         className="w-5 h-4 shrink-0 flex items-center justify-end"
-                        title={isCurrentTrack ? 'Playing' : 'Play'}
+                        title={isCurrentTrack ? (player.playing ? 'Pause' : 'Play') : 'Play'}
                       >
                         {/* The wrapper flattens on pause — children keep animating, so the
                             transition runs on a non-animated property and actually eases. */}

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 
@@ -18,6 +18,7 @@ interface PlayerState {
   hasNext: boolean;
   hasPrev: boolean;
   play: (track: PlayerTrack, queue?: PlayerTrack[]) => void;
+  toggle: () => void;
   playAt: (index: number) => void;
   next: () => void;
   prev: () => void;
@@ -69,6 +70,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<PlayerTrack[]>(() => loadPersisted()?.queue ?? []);
   const [index, setIndex] = useState(() => loadPersisted()?.index ?? 0);
   const [playing, setPlaying] = useState(false);
+  // The <audio> element lives in PlayerBar; hoisting the ref lets context
+  // consumers (e.g. track rows) pause/resume without owning the element.
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Keep the snapshot's queue/index current. A track change resets the saved
   // position; a same-track write (e.g. the mount that restored state) keeps it.
@@ -99,6 +103,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const prev = useCallback(() => setIndex((i) => Math.max(i - 1, 0)), []);
   const playAt = useCallback((i: number) => setIndex(Math.min(Math.max(i, 0), queue.length - 1)), [queue.length]);
   const close = useCallback(() => setQueue([]), []);
+  const toggle = useCallback(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) a.play(); else a.pause();
+  }, []);
 
   const current = queue.length > 0 ? queue[Math.min(index, queue.length - 1)] : null;
 
@@ -109,13 +118,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     playing,
     hasNext: index < queue.length - 1,
     hasPrev: index > 0,
-    play, playAt, next, prev, close,
-  }), [current, queue, index, playing, play, playAt, next, prev, close]);
+    play, playAt, next, prev, close, toggle,
+  }), [current, queue, index, playing, play, playAt, next, prev, close, toggle]);
 
   return (
     <PlayerContext.Provider value={state}>
       {children}
-      <PlayerBar setPlaying={setPlaying} />
+      <PlayerBar setPlaying={setPlaying} audioRef={audioRef} />
     </PlayerContext.Provider>
   );
 }
@@ -125,9 +134,8 @@ function fmtTime(s: number): string {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-function PlayerBar({ setPlaying }: { setPlaying: (p: boolean) => void }) {
+function PlayerBar({ setPlaying, audioRef }: { setPlaying: (p: boolean) => void; audioRef: RefObject<HTMLAudioElement | null> }) {
   const { current, queue, index, playing, hasNext, hasPrev, next, prev, playAt, close } = usePlayer();
-  const audioRef = useRef<HTMLAudioElement>(null);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(() => loadPersisted()?.volume ?? 1);
