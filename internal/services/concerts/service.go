@@ -35,7 +35,7 @@ const (
 	defaultBaseURL = "https://app.ticketmaster.com/discovery/v2"
 	defaultGeoURL  = "https://api.zippopotam.us" // postal→latlong, no key needed
 	defaultRadius  = "50"
-	cacheTTL       = 12 * time.Hour
+	cacheTTL       = 7 * 24 * time.Hour
 	geoTTL         = 30 * 24 * time.Hour    // postal codes don't move
 	maxPages       = 2                      // per artist — own-shows feeds are tiny
 	requestPace    = 210 * time.Millisecond // TM free tier allows ~5 req/s

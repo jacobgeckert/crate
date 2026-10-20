@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import { usePersistedQuery } from '../lib/persistedQuery';
 import type { Show } from '../types/index';
 
 function formatDate(iso: string): string {
@@ -34,10 +35,7 @@ function daysUntil(iso: string): string {
 
 export default function Shows() {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
-    queryKey: ['concerts'],
-    queryFn: () => api.getConcerts(),
-  });
+  const { data, isLoading } = usePersistedQuery('concerts', ['concerts'], () => api.getConcerts());
 
   const { toast } = useToast();
   const refresh = useMutation({

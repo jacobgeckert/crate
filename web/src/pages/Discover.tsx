@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import { usePersistedQuery } from '../lib/persistedQuery';
 import type { Suggestion, DiscoverResponse } from '../types/index';
 
 // dismissKey mirrors the backend's DismissalKey — MBID when present, else a
@@ -17,10 +18,7 @@ export default function Discover() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['discover'],
-    queryFn: () => api.getDiscover(),
-  });
+  const { data, isLoading } = usePersistedQuery('discover', ['discover'], () => api.getDiscover());
 
   const refresh = useMutation({
     mutationFn: () => api.getDiscover(true),
@@ -98,8 +96,11 @@ function SuggestionRow({ suggestion: s }: { suggestion: Suggestion }) {
   const dismiss = useMutation({
     mutationFn: () => api.dismissDiscover(dismissKey(s)),
     onSuccess: () => {
+      // Keep the original fetch time so a dismissal doesn't restart the weekly cache window.
+      const updatedAt = queryClient.getQueryState(['discover'])?.dataUpdatedAt;
       queryClient.setQueryData<DiscoverResponse>(['discover'], (old) =>
-        old ? { ...old, suggestions: (old.suggestions ?? []).filter((x) => dismissKey(x) !== dismissKey(s)) } : old);
+        old ? { ...old, suggestions: (old.suggestions ?? []).filter((x) => dismissKey(x) !== dismissKey(s)) } : old,
+      { updatedAt });
     },
   });
   const to = s.mbid

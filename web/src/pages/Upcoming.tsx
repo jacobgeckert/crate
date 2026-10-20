@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueryClient, useIsFetching } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Album } from '../types/index';
+import { usePersistedQuery } from '../lib/persistedQuery';
 
 const TYPE_BADGES: Record<string, string> = {
   ep: 'EP',
@@ -30,10 +31,9 @@ function daysUntil(iso: string): string {
 }
 
 export default function Upcoming() {
-  const { data: releases, isLoading } = useQuery({
-    queryKey: ['upcoming-releases'],
-    queryFn: api.getUpcomingReleases,
-  });
+  const queryClient = useQueryClient();
+  const { data: releases, isLoading } = usePersistedQuery('upcoming-releases', ['upcoming-releases'], api.getUpcomingReleases);
+  const refreshing = useIsFetching({ queryKey: ['upcoming-releases'] }) > 0;
 
   // Group by month for section headers.
   const groups = useMemo(() => {
@@ -57,7 +57,16 @@ export default function Upcoming() {
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
-      <h1 className="text-xl font-bold mb-1">Upcoming</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-xl font-bold">Upcoming</h1>
+        <button
+          onClick={() => queryClient.refetchQueries({ queryKey: ['upcoming-releases'] })}
+          disabled={refreshing}
+          className="text-xs text-zinc-400 bg-zinc-800 rounded-lg px-3 py-1.5 active:bg-zinc-700 transition-colors disabled:opacity-50"
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
       <p className="text-sm text-zinc-500 mb-4">Announced releases from your artists</p>
 
       {isLoading && (
