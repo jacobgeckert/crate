@@ -45,7 +45,7 @@ func main() {
 		userAgent = "Crate/0.1.0 (https://github.com/TheOutdoorProgrammer/crate)"
 	}
 
-	lis, err := net.Listen("tcp", ":"+port)
+	lis, err := net.Listen("tcp", ":"+port) // #nosec G102 -- providers can run as external services that crate reaches over the network
 	if err != nil {
 		slog.Error("failed to listen", "error", err)
 		os.Exit(1)
