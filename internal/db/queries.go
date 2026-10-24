@@ -91,7 +91,8 @@ func (q *Queries) ListArtists() ([]models.Artist, error) {
 	rows, err := q.db.Query(
 		`SELECT a.id, a.name, a.display_name, a.provider, a.provider_id, a.image_url, a.status, a.watch_new_releases, a.watch_new_releases_since, a.created_at, a.updated_at,
 		        COUNT(t.id) as total_tracks,
-		        COALESCE(SUM(CASE WHEN t.status = 'owned' THEN 1 ELSE 0 END), 0) as owned_tracks
+		        COALESCE(SUM(CASE WHEN t.status = 'owned' THEN 1 ELSE 0 END), 0) as owned_tracks,
+		        COALESCE(SUM(CASE WHEN t.status IN ('wanted', 'downloading') THEN 1 ELSE 0 END), 0) as wanted_tracks
 		 FROM artists a
 		 LEFT JOIN albums al ON al.artist_id = a.id AND al.status != 'ignored'
 		      AND (
@@ -111,7 +112,7 @@ func (q *Queries) ListArtists() ([]models.Artist, error) {
 	for rows.Next() {
 		var a models.Artist
 		if err := rows.Scan(&a.ID, &a.Name, &a.DisplayName, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status,
-			&a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt, &a.TotalTracks, &a.OwnedTracks); err != nil {
+			&a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt, &a.TotalTracks, &a.OwnedTracks, &a.WantedTracks); err != nil {
 			return nil, err
 		}
 		artists = append(artists, a)

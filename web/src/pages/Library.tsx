@@ -11,7 +11,9 @@ import { useToast } from '../components/Toast';
 import type { Artist } from '../types/index';
 import { artistName } from '../types/index';
 
-type LibrarySort = 'az' | 'recent';
+type LibrarySort = 'az' | 'recent' | 'missing';
+
+const SORT_LABELS: Record<LibrarySort, string> = { az: 'A–Z', recent: 'Recent', missing: 'Missing' };
 
 export default function Library() {
   const { toast } = useToast();
@@ -80,11 +82,21 @@ export default function Library() {
     () => [...filteredArtists].sort((a, b) => b.created_at.localeCompare(a.created_at) || a.name.localeCompare(b.name)),
     [filteredArtists],
   );
+  const missingArtists = useMemo(
+    () =>
+      filteredArtists
+        .filter((a) => (a.wanted_tracks ?? 0) > 0)
+        .sort((a, b) => (b.wanted_tracks ?? 0) - (a.wanted_tracks ?? 0) || artistName(a).localeCompare(artistName(b))),
+    [filteredArtists],
+  );
   // Display order for shift-click range selection — grouped re-sorts for A–Z,
   // so the id sequence has to come from the rendered list, not filteredArtists.
   const displayOrder = useMemo(
-    () => (sort === 'recent' ? recentArtists : grouped.flatMap((g) => g.artists)).map((a) => a.id),
-    [sort, recentArtists, grouped],
+    () =>
+      (sort === 'recent' ? recentArtists : sort === 'missing' ? missingArtists : grouped.flatMap((g) => g.artists)).map(
+        (a) => a.id,
+      ),
+    [sort, recentArtists, missingArtists, grouped],
   );
   const setSortPersist = (s: LibrarySort) => {
     setSort(s);
@@ -273,7 +285,7 @@ export default function Library() {
           Select
         </button>
         <div className="flex rounded-lg bg-zinc-800/60 p-0.5 shrink-0">
-          {(['az', 'recent'] as const).map((s) => (
+          {(['az', 'recent', 'missing'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setSortPersist(s)}
@@ -281,7 +293,7 @@ export default function Library() {
                 sort === s ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              {s === 'az' ? 'A–Z' : 'Recent'}
+              {SORT_LABELS[s]}
             </button>
           ))}
         </div>
@@ -303,6 +315,16 @@ export default function Library() {
                 addedLabel={formatRelativeDate(artist.created_at)}
                 {...rowProps(artist)}
               />
+            ))}
+          </div>
+        )}
+        {sort === 'missing' && !isLoading && missingArtists.length === 0 && !debouncedFilter && (
+          <p className="text-zinc-500 text-sm text-center py-6">No watched artists are missing wanted tracks</p>
+        )}
+        {sort === 'missing' && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+            {missingArtists.map((artist) => (
+              <ArtistCard key={artist.id} artist={artist} showMissing {...rowProps(artist)} />
             ))}
           </div>
         )}
@@ -464,6 +486,7 @@ function ArtistCard({
   matchCount,
   isTrackMatch,
   addedLabel,
+  showMissing,
   selecting,
   selected,
   onSelect,
@@ -472,6 +495,7 @@ function ArtistCard({
   matchCount?: number;
   isTrackMatch?: boolean;
   addedLabel?: string;
+  showMissing?: boolean;
   selecting?: boolean;
   selected?: boolean;
   onSelect?: (e: { shiftKey: boolean }) => void;
@@ -538,6 +562,9 @@ function ArtistCard({
         ) : (
           <>
             {addedLabel && <p className="text-[10px] text-zinc-600">Added {addedLabel}</p>}
+            {showMissing && (
+              <p className="text-[10px] text-amber-400">{artist.wanted_tracks ?? 0} missing</p>
+            )}
             <div className="mt-1">
               <ProgressBar owned={owned} total={total} />
             </div>

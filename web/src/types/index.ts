@@ -16,6 +16,7 @@ export interface Artist {
   albums?: Album[];
   total_tracks?: number;
   owned_tracks?: number;
+  wanted_tracks?: number;
   orphaned?: boolean;
   sync?: { active: boolean; phase?: string; total: number; done: number; current?: string };
 }

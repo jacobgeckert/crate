@@ -57,7 +57,10 @@ type Artist struct {
 	Albums            []Album         `json:"albums,omitempty"`
 	TotalTracks       int             `json:"total_tracks,omitempty"`
 	OwnedTracks       int             `json:"owned_tracks,omitempty"`
-	Orphaned          bool            `json:"orphaned,omitempty"`
+	// WantedTracks counts released, non-ignored tracks still wanted or
+	// downloading — what the Library "Missing" view filters on.
+	WantedTracks int  `json:"wanted_tracks,omitempty"`
+	Orphaned     bool `json:"orphaned,omitempty"`
 	// Sync is a live snapshot of background discography-sync progress — set
 	// only by the artist detail endpoint while a reconcile is running/has run.
 	Sync *SyncInfo `json:"sync,omitempty"`

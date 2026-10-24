@@ -236,3 +236,34 @@ func TestAlbumHasActiveDownloads(t *testing.T) {
 		t.Fatalf("track mid-download: active = %v, err = %v", active, err)
 	}
 }
+
+func TestListArtistsCountsWantedTracks(t *testing.T) {
+	q := newTestQueries(t)
+	artist := &models.Artist{Name: "Test Artist", Provider: "test", ProviderID: "a1", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(artist); err != nil {
+		t.Fatal(err)
+	}
+	album := &models.Album{ArtistID: artist.ID, Title: "Test Album", Provider: "test", ProviderID: "al1", RecordType: "album", Status: models.AlbumStatusWatched}
+	if err := q.CreateAlbum(album); err != nil {
+		t.Fatal(err)
+	}
+	statuses := []models.TrackStatus{models.TrackStatusWanted, models.TrackStatusDownloading, models.TrackStatusOwned, models.TrackStatusIgnored}
+	for i, st := range statuses {
+		tr := &models.Track{AlbumID: album.ID, Title: string(st), TrackNumber: i + 1, DurationMs: 200000, Provider: "test", ProviderID: string(st), Status: st}
+		if err := q.CreateTrack(tr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	artists, err := q.ListArtists()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artists) != 1 {
+		t.Fatalf("expected 1 artist, got %d", len(artists))
+	}
+	a := artists[0]
+	if a.WantedTracks != 2 || a.OwnedTracks != 1 || a.TotalTracks != 3 {
+		t.Errorf("got wanted=%d owned=%d total=%d, want 2/1/3", a.WantedTracks, a.OwnedTracks, a.TotalTracks)
+	}
+}
