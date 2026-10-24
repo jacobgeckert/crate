@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
@@ -119,8 +120,10 @@ func (s *Server) handleLinkTrack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "track not found")
 		return
 	}
-	if src.Provider != provider.LocalProvider || src.FilePath == nil {
-		writeError(w, http.StatusBadRequest, "only an owned local track can be linked")
+	// Any owned file can be reassigned — a local leftover, or a provider row
+	// keyed to another edition's track id that never folded.
+	if src.Status != models.TrackStatusOwned || src.FilePath == nil {
+		writeError(w, http.StatusBadRequest, "only an owned track with a file can be assigned")
 		return
 	}
 	dst, err := s.queries.GetTrack(req.TargetTrackID)
@@ -128,23 +131,30 @@ func (s *Server) handleLinkTrack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "target track not found")
 		return
 	}
+	if dst.ID == src.ID {
+		writeError(w, http.StatusBadRequest, "target track is the same track")
+		return
+	}
 	if dst.AlbumID != src.AlbumID {
 		writeError(w, http.StatusBadRequest, "target track must be in the same album")
 		return
 	}
-	if dst.Status != models.TrackStatusWanted {
+	if dst.Status != models.TrackStatusWanted && dst.Status != models.TrackStatusIgnored {
 		writeError(w, http.StatusBadRequest, "target track already has a file")
 		return
 	}
 
-	if err := s.queries.ClaimTrackFile(dst.ID, *src.FilePath, strVal(src.DownloadFormat), intVal(src.DownloadBitrate), src.DurationMs, src.MBRecordingID); err != nil {
+	// Drop the target's queued searches first so it isn't re-downloaded.
+	if err := s.queries.DeletePendingDownloadsForTrack(dst.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear queued downloads")
+		return
+	}
+	if err := s.queries.AbsorbTrack(dst.ID, src.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to link track")
 		return
 	}
-	if err := s.queries.DeleteTrack(src.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to remove local duplicate")
-		return
-	}
+	s.activityLog.Record("track_link", "track", dst.ID, fmt.Sprintf(
+		"Assigned %s to track %d (%s)", *src.FilePath, dst.TrackNumber, dst.Title))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "linked", "claimed": dst.ID})
 }
 

@@ -273,6 +273,13 @@ func (q *Queries) AbsorbTrack(dstID, srcID int64) error {
 	return tx.Commit()
 }
 
+// DeletePendingDownloadsForTrack removes queue rows that haven't started a
+// transfer yet, so a track that just gained a file isn't fetched again.
+func (q *Queries) DeletePendingDownloadsForTrack(trackID int64) error {
+	_, err := q.db.Exec(`DELETE FROM download_queue WHERE track_id = ? AND status IN ('pending', 'searching')`, trackID)
+	return err
+}
+
 // SetTrackMBRecordingID fills in a missing MusicBrainz recording id — rows
 // created before the provider exposed it get stamped on the next sync.
 func (q *Queries) SetTrackMBRecordingID(id int64, recordingID string) error {

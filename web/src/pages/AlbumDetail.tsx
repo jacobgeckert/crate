@@ -111,6 +111,7 @@ export default function AlbumDetail() {
     onSuccess: () => {
       toast('Track linked', 'success');
       setLinkTrackId(null);
+      setSelectedTrack(null);
       queryClient.invalidateQueries({ queryKey: ['album', id] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     },
@@ -412,6 +413,12 @@ export default function AlbumDetail() {
   const wantedTracks = useMemo(
     () => album?.tracks?.filter((t) => t.status === 'wanted') ?? [],
     [album]
+  );
+
+  const [assignOpen, setAssignOpen] = useState(false);
+  const assignTargets = useMemo(
+    () => album?.tracks?.filter((t) => t.id !== selectedTrack?.id && (t.status === 'wanted' || t.status === 'ignored')) ?? [],
+    [album, selectedTrack]
   );
 
   if (isLoading) {
@@ -1039,7 +1046,7 @@ export default function AlbumDetail() {
 
       <DetailSheet
         open={!!selectedTrack}
-        onClose={() => setSelectedTrack(null)}
+        onClose={() => { setSelectedTrack(null); setAssignOpen(false); }}
         title={selectedTrack?.title ?? ''}
       >
         {selectedTrack && (
@@ -1057,6 +1064,44 @@ export default function AlbumDetail() {
             {selectedTrack.file_path && <DetailRow label="Path">{selectedTrack.file_path}</DetailRow>}
             <DetailRow label="Lyrics">{selectedTrack.has_lyrics ? 'Synced (.lrc)' : 'None'}</DetailRow>
             <DetailRow label="Provider">{selectedTrack.provider} · {selectedTrack.provider_id}</DetailRow>
+            {selectedTrack.status === 'owned' && selectedTrack.file_path && (
+              <div className="pt-3">
+                <button
+                  onClick={() => setAssignOpen((o) => !o)}
+                  className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors"
+                >
+                  Assign file to track…
+                </button>
+                {assignOpen && (
+                  <div className="mt-2">
+                    <p className="text-[11px] text-zinc-500 mb-1.5">
+                      Move this file onto another track on the album. The chosen track becomes owned and this row is removed.
+                    </p>
+                    {assignTargets.length === 0 && (
+                      <p className="text-[11px] text-zinc-500 py-1">No wanted or ignored tracks on this album.</p>
+                    )}
+                    <div className="space-y-0.5 max-h-56 overflow-y-auto">
+                      {assignTargets.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => linkTrack.mutate({ localId: selectedTrack.id, targetId: t.id })}
+                          disabled={linkTrack.isPending}
+                          className="w-full text-left rounded-lg px-2.5 py-1.5 bg-zinc-800/50 hover:bg-zinc-700 active:bg-zinc-700 transition-colors disabled:opacity-50"
+                        >
+                          <p className="text-[11px] truncate">
+                            <span className="text-zinc-500 tabular-nums mr-1.5">
+                              {t.disc_number > 1 ? `${t.disc_number}-` : ''}{t.track_number}
+                            </span>
+                            {t.title}
+                            <span className="text-zinc-600 ml-1.5">{t.status}</span>
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </DetailSheet>

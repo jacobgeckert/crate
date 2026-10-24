@@ -122,6 +122,60 @@ func TestLinkTrackClaimsWanted(t *testing.T) {
 	}
 }
 
+// TestLinkTrackReassignsOwnedProviderRow: an owned provider row keyed to
+// another edition's track id is assigned onto the edition's wanted duplicate.
+func TestLinkTrackReassignsOwnedProviderRow(t *testing.T) {
+	e := newTestEnv(t)
+	q := e.queries
+
+	artist := models.Artist{Name: "Test Artist", Provider: "test", ProviderID: "1000", Status: models.ArtistStatusWatched}
+	if err := q.CreateArtist(&artist); err != nil {
+		t.Fatal(err)
+	}
+	albumID := seedProviderAlbum(t, q, artist.ID, "Album One", "2000", 2023)
+	wantedID := seedWantedTrack(t, q, albumID, "Intro", "3001", 1)
+	seedOwnedLocalTrack(t, q, albumID, "Intro", "loc-intro", 1)
+	tracks, _ := q.ListTracksByAlbum(albumID)
+	var strayID int64
+	for _, tr := range tracks {
+		if tr.Status == models.TrackStatusOwned {
+			strayID = tr.ID
+		}
+	}
+	if err := q.RelinkTrack(strayID, "test", "9001"); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.EnqueueDownload(wantedID); err != nil {
+		t.Fatal(err)
+	}
+	other := seedWantedTrack(t, q, albumID, "Second", "3002", 2)
+	if err := q.ClaimTrackFile(other, "/x.flac", "flac", 0, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := e.do("POST", fmt.Sprintf("/api/tracks/%d/link", strayID), fmt.Sprintf(`{"target_track_id":%d}`, other)); w.Code != http.StatusBadRequest {
+		t.Errorf("link onto owned target status = %d, want 400", w.Code)
+	}
+
+	w := e.do("POST", fmt.Sprintf("/api/tracks/%d/link", strayID), fmt.Sprintf(`{"target_track_id":%d}`, wantedID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("link track status = %d, body %s", w.Code, w.Body.String())
+	}
+	claimed, err := q.GetTrack(wantedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.Status != models.TrackStatusOwned || claimed.FilePath == nil || claimed.ProviderID != "3001" {
+		t.Errorf("target = %s/%s file=%v, want owned 3001 with file", claimed.Status, claimed.ProviderID, claimed.FilePath)
+	}
+	if _, err := q.GetTrack(strayID); err == nil {
+		t.Error("stray row still exists, want deleted")
+	}
+	if dls, _ := q.ListDownloadsWithTrack(string(models.DownloadStatusPending)); len(dls) != 0 {
+		t.Errorf("pending downloads = %d, want 0", len(dls))
+	}
+}
+
 func TestLinkAlbumGuards(t *testing.T) {
 	e := newTestEnv(t)
 	q := e.queries
