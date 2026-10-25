@@ -48,6 +48,7 @@ func (pm *ProcessManager) StartProviders(ctx context.Context, manager *Manager, 
 		if cfg.Binary == "external" {
 			if err := manager.RegisterProvider(ctx, cfg.Name, cfg.Address); err != nil {
 				slog.Error("failed to connect to external provider", "name", cfg.Name, "address", cfg.Address, "error", err)
+				go retryRegister(ctx, manager, cfg.Name, cfg.Address, registerRetryInterval)
 			}
 			continue
 		}
@@ -70,9 +71,12 @@ func (pm *ProcessManager) StartProviders(ctx context.Context, manager *Manager, 
 			}
 		}(cmd, cfg.Name)
 
-		address := "localhost:" + port
+		// Loopback IP, not "localhost": the name can be sent to the
+		// container's DNS server and hang each dial until it times out.
+		address := "127.0.0.1:" + port
 		if err := waitForProvider(ctx, manager, cfg.Name, address, 10*time.Second); err != nil {
-			slog.Error("provider failed to become ready", "name", cfg.Name, "error", err)
+			slog.Error("provider failed to become ready, retrying in background", "name", cfg.Name, "error", err)
+			go retryRegister(ctx, manager, cfg.Name, address, registerRetryInterval)
 		}
 	}
 	return nil
@@ -91,6 +95,23 @@ func waitForProvider(ctx context.Context, manager *Manager, name, address string
 		}
 	}
 	return fmt.Errorf("provider %s not ready after %s", name, timeout)
+}
+
+const registerRetryInterval = 15 * time.Second
+
+// retryRegister keeps trying to register a provider that missed the startup
+// window, so a slow start doesn't leave every artist orphaned until restart.
+func retryRegister(ctx context.Context, manager *Manager, name, address string, interval time.Duration) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+		if err := manager.RegisterProvider(ctx, name, address); err == nil {
+			return
+		}
+	}
 }
 
 func (pm *ProcessManager) StopAll() {
