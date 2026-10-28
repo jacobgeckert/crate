@@ -33,9 +33,11 @@ function daysUntil(iso: string): string {
   return months === 1 ? 'in ~1mo' : `in ~${months}mo`;
 }
 
+const keepConfigured = (d: { configured: boolean }) => d.configured;
+
 export default function Shows() {
   const queryClient = useQueryClient();
-  const { data, isLoading } = usePersistedQuery('concerts', ['concerts'], () => api.getConcerts());
+  const { data, isLoading } = usePersistedQuery('concerts', ['concerts'], () => api.getConcerts(), keepConfigured);
 
   const { toast } = useToast();
   const refresh = useMutation({

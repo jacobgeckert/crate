@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import { clearPersisted } from '../lib/persistedQuery';
 
 interface QualityTier {
   format: string;
@@ -196,6 +197,11 @@ export default function Settings() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
+      // Key/postal/radius changes must not wait out the week-long page cache.
+      for (const name of ['concerts', 'discover']) {
+        clearPersisted(name);
+        queryClient.removeQueries({ queryKey: [name] });
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     },

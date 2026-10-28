@@ -14,11 +14,13 @@ function dismissKey(s: Suggestion): string {
   return 'name:' + n;
 }
 
+const keepConfigured = (d: { configured: boolean }) => d.configured;
+
 export default function Discover() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data, isLoading } = usePersistedQuery('discover', ['discover'], () => api.getDiscover());
+  const { data, isLoading } = usePersistedQuery('discover', ['discover'], () => api.getDiscover(), keepConfigured);
 
   const refresh = useMutation({
     mutationFn: () => api.getDiscover(true),
