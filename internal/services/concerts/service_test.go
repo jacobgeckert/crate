@@ -322,3 +322,25 @@ func containsAll(s string, subs ...string) bool {
 	}
 	return true
 }
+
+func TestShowsReportsProgress(t *testing.T) {
+	s, queries := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(tmFeed))
+	})
+	configure(t, queries)
+	for _, name := range []string{"blink-182", "Offspring"} {
+		if err := queries.CreateArtist(&models.Artist{Name: name, Provider: "test", ProviderID: name, Status: models.ArtistStatusWatched}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p := s.Progress(); p.Running {
+		t.Fatalf("expected idle progress before lookup, got %+v", p)
+	}
+	if _, err := s.Shows(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if p := s.Progress(); p.Running || p.Done != 2 || p.Total != 2 {
+		t.Errorf("expected finished 2/2 progress, got %+v", p)
+	}
+}

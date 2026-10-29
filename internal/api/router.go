@@ -156,6 +156,7 @@ func (s *Server) setupRouter() chi.Router {
 
 		r.Get("/releases/upcoming", s.handleUpcomingReleases)
 		r.Get("/concerts", s.handleGetConcerts)
+		r.Get("/concerts/progress", s.handleConcertsProgress)
 		r.Get("/discover", s.handleGetDiscover)
 		r.Post("/discover/dismiss", s.handleDismissDiscover)
 

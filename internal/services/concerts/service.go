@@ -63,7 +63,18 @@ type Show struct {
 	Image     string       `json:"image,omitempty"`
 }
 
+// Progress reports how far the current Shows lookup has got, so the UI can
+// show a determinate bar during a slow refresh.
+type Progress struct {
+	Running bool `json:"running"`
+	Done    int  `json:"done"`
+	Total   int  `json:"total"`
+}
+
 type Service struct {
+	progMu sync.Mutex
+	prog   Progress
+
 	queries *db.Queries
 	cache   *cache.Cache
 	http    *http.Client
@@ -98,6 +109,19 @@ func (s *Service) config() (apiKey, postal, radius, unit string, ok bool) {
 	return
 }
 
+// Progress returns a snapshot of the in-flight Shows lookup.
+func (s *Service) Progress() Progress {
+	s.progMu.Lock()
+	defer s.progMu.Unlock()
+	return s.prog
+}
+
+func (s *Service) setProgress(p Progress) {
+	s.progMu.Lock()
+	s.prog = p
+	s.progMu.Unlock()
+}
+
 // Configured reports whether the minimum settings are present.
 func (s *Service) Configured() bool {
 	_, _, _, _, ok := s.config()
@@ -121,6 +145,8 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list artists: %w", err)
 	}
+	s.setProgress(Progress{Running: true, Total: len(artists)})
+	defer s.setProgress(Progress{Done: len(artists), Total: len(artists)})
 
 	type artistResult struct {
 		artist *models.Artist
@@ -160,7 +186,10 @@ func (s *Service) Shows(ctx context.Context, refresh bool) ([]Show, error) {
 	byEvent := make(map[string]*Show)
 	seen := make(map[string]bool)
 	var failCount int
+	var done int
 	for res := range results {
+		done++
+		s.setProgress(Progress{Running: true, Done: done, Total: len(artists)})
 		if res.err != nil {
 			failCount++
 			slog.Warn("concerts: artist events fetch failed", "artist", res.artist.Name, "error", res.err)

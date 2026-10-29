@@ -23,3 +23,7 @@ func (s *Server) handleGetConcerts(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "shows": shows})
 }
+
+func (s *Server) handleConcertsProgress(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.concerts.Progress())
+}

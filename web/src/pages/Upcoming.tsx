@@ -1,9 +1,11 @@
-import { useMemo } from 'react';
-import { useQueryClient, useIsFetching } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Album } from '../types/index';
 import { usePersistedQuery } from '../lib/persistedQuery';
+import { useToast } from '../components/Toast';
+import RefreshStatus, { Spinner } from '../components/RefreshStatus';
 
 const TYPE_BADGES: Record<string, string> = {
   ep: 'EP',
@@ -33,7 +35,26 @@ function daysUntil(iso: string): string {
 export default function Upcoming() {
   const queryClient = useQueryClient();
   const { data: releases, isLoading } = usePersistedQuery('upcoming-releases', ['upcoming-releases'], api.getUpcomingReleases);
-  const refreshing = useIsFetching({ queryKey: ['upcoming-releases'] }) > 0;
+  const { toast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
+
+  // The lookup is a quick local query; hold the indicator briefly so a click
+  // visibly does something, then confirm with a toast.
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['upcoming-releases'] }, { throwOnError: true }),
+        new Promise((r) => setTimeout(r, 600)),
+      ]);
+      const n = queryClient.getQueryData<Album[]>(['upcoming-releases'])?.length ?? 0;
+      toast(n > 0 ? `Up to date · ${n} upcoming release${n === 1 ? '' : 's'}` : 'Up to date · no upcoming releases', 'success');
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Group by month for section headers.
   const groups = useMemo(() => {
@@ -60,14 +81,16 @@ export default function Upcoming() {
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-bold">Upcoming</h1>
         <button
-          onClick={() => queryClient.refetchQueries({ queryKey: ['upcoming-releases'] })}
+          onClick={refresh}
           disabled={refreshing}
           className="text-xs text-zinc-400 bg-zinc-800 rounded-lg px-3 py-1.5 active:bg-zinc-700 transition-colors disabled:opacity-50"
         >
-          {refreshing ? 'Refreshing…' : 'Refresh'}
+          {refreshing ? <span className="flex items-center gap-1.5"><Spinner />Refreshing…</span> : 'Refresh'}
         </button>
       </div>
       <p className="text-sm text-zinc-500 mb-4">Announced releases from your artists</p>
+
+      {refreshing && <RefreshStatus label="Checking for announced releases" />}
 
       {isLoading && (
         <div className="space-y-2">
@@ -87,7 +110,7 @@ export default function Upcoming() {
       )}
 
       {groups.map((group) => (
-        <div key={group.label}>
+        <div key={group.label} className={refreshing ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-4 mb-1.5 first:mt-0">
             {group.label}
           </p>

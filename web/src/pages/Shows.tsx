@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import RefreshStatus, { Spinner } from '../components/RefreshStatus';
 import { usePersistedQuery } from '../lib/persistedQuery';
 import type { Show } from '../types/index';
 
@@ -50,6 +51,17 @@ export default function Shows() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  // Ticketmaster lookups are paced per artist, so a full refresh can take a
+  // while — poll the server's counter to show real progress.
+  const working = refresh.isPending || isLoading;
+  const { data: progress } = useQuery({
+    queryKey: ['concerts-progress'],
+    queryFn: api.getConcertsProgress,
+    enabled: working,
+    refetchInterval: working ? 500 : false,
+    gcTime: 0,
+  });
+
   const groups = useMemo(() => {
     const map = new Map<string, Show[]>();
     for (const s of data?.shows ?? []) {
@@ -79,11 +91,19 @@ export default function Shows() {
             disabled={refresh.isPending}
             className="text-xs text-zinc-400 bg-zinc-800 rounded-lg px-3 py-1.5 active:bg-zinc-700 transition-colors disabled:opacity-50"
           >
-            {refresh.isPending ? 'Refreshing…' : 'Refresh'}
+            {refresh.isPending ? <span className="flex items-center gap-1.5"><Spinner />Refreshing…</span> : 'Refresh'}
           </button>
         )}
       </div>
       <p className="text-sm text-zinc-500 mb-4">Upcoming concerts for artists you watch</p>
+
+      {working && (
+        <RefreshStatus
+          label="Checking Ticketmaster for your artists"
+          done={progress?.running ? progress.done : undefined}
+          total={progress?.running ? progress.total : undefined}
+        />
+      )}
 
       {isLoading && (
         <div className="space-y-2">
@@ -113,7 +133,7 @@ export default function Shows() {
       )}
 
       {groups.map((group) => (
-        <div key={group.label}>
+        <div key={group.label} className={refresh.isPending ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mt-4 mb-1.5 first:mt-0">
             {group.label}
           </p>

@@ -88,6 +88,7 @@ export const api = {
       body: JSON.stringify({ url }),
     }),
   getUpcomingReleases: () => request<Album[]>('/releases/upcoming'),
+  getConcertsProgress: () => request<{ running: boolean; done: number; total: number }>('/concerts/progress'),
   getConcerts: (refresh = false) =>
     request<ConcertsResponse>(`/concerts${refresh ? '?refresh=1' : ''}`),
   getDiscover: (refresh = false) =>
